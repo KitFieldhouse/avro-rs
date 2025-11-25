@@ -1502,49 +1502,9 @@ impl Parser {
         name: &str,
         enclosing_namespace: &Namespace,
     ) -> AvroResult<Schema> {
-        fn get_schema_ref(parsed: &Schema) -> Schema {
-            match parsed {
-                &Schema::Record(RecordSchema { ref name, .. })
-                | &Schema::Enum(EnumSchema { ref name, .. })
-                | &Schema::Fixed(FixedSchema { ref name, .. }) => {
-                    Schema::Ref { name: name.clone() }
-                }
-                _ => parsed.clone(),
-            }
-        }
-
         let name = Name::new(name)?;
         let fully_qualified_name = name.fully_qualified_name(enclosing_namespace);
-
-        if self.parsed_schemas.contains_key(&fully_qualified_name) {
-            return Ok(Schema::Ref {
-                name: fully_qualified_name,
-            });
-        }
-        if let Some(resolving_schema) = self.resolving_schemas.get(&fully_qualified_name) {
-            return Ok(resolving_schema.clone());
-        }
-
-        // For good error reporting we add this check
-        match name.name.as_str() {
-            "record" | "enum" | "fixed" => {
-                return Err(Details::InvalidSchemaRecord(name.to_string()).into());
-            }
-            _ => (),
-        }
-
-        let value = self
-            .input_schemas
-            .remove(&fully_qualified_name)
-            // TODO make a better descriptive error message here that conveys that a named schema cannot be found
-            .ok_or_else(|| Details::ParsePrimitive(fully_qualified_name.fullname(None)))?;
-
-        // parsing a full schema from inside another schema. Other full schema will not inherit namespace
-        let parsed = self.parse(&value, &None)?;
-        self.parsed_schemas
-            .insert(get_schema_type_name(name, value), parsed.clone());
-
-        Ok(get_schema_ref(&parsed))
+        Ok(Schema::Ref { name: fully_qualified_name })
     }
 
     fn parse_precision_and_scale(
