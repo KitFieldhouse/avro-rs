@@ -1441,13 +1441,8 @@ impl Parser {
 
     /// Convert the input schemas to parsed_schemas
     fn parse_input_schemas(&mut self) -> Result<(), Error> {
-        while !self.input_schemas.is_empty() {
-            let next_name = self
-                .input_schemas
-                .keys()
-                .next()
-                .expect("Input schemas unexpectedly empty")
-                .to_owned();
+        for next_name in &self.input_order.clone(){
+            if self.parsed_schemas.contains_key(next_name) {continue};
             let (name, value) = self
                 .input_schemas
                 .remove_entry(&next_name)
