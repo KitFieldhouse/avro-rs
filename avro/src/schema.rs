@@ -1100,7 +1100,7 @@ struct Parser {
     /// A map of name -> Schema::Ref
     /// Used to resolve cyclic references, i.e. when a
     /// field's type is a reference to its record's type
-    resolving_schemas: Names,
+    defined_names: Vec<String>,
     input_order: Vec<Name>,
     /// A map of name -> fully parsed Schema
     /// Used to avoid parsing the same schema twice
@@ -1178,7 +1178,7 @@ impl Schema {
         }
         let mut parser = Parser {
             input_schemas,
-            resolving_schemas: HashMap::default(),
+            defined_names: Vec::new(), 
             input_order,
             parsed_schemas: HashMap::with_capacity(input_len),
         };
@@ -1220,7 +1220,7 @@ impl Schema {
         }
         let mut parser = Parser {
             input_schemas,
-            resolving_schemas: HashMap::default(),
+            defined_names: Vec::new(), 
             input_order,
             parsed_schemas: HashMap::with_capacity(schemata_len),
         };
@@ -1252,7 +1252,7 @@ impl Schema {
     pub(crate) fn parse_with_names(value: &Value, names: Names) -> AvroResult<Schema> {
         let mut parser = Parser {
             input_schemas: HashMap::with_capacity(1),
-            resolving_schemas: Names::default(),
+            defined_names: Vec::new(), 
             input_order: Vec::with_capacity(1),
             parsed_schemas: names,
         };
@@ -1785,43 +1785,29 @@ impl Parser {
         }
     }
 
-    fn register_resolving_schema(&mut self, name: &Name, aliases: &Aliases) {
-        let resolving_schema = Schema::Ref { name: name.clone() };
-        self.resolving_schemas
-            .insert(name.clone(), resolving_schema.clone());
+    fn check_and_register_name_and_aliases(&mut self, name: &Name, aliases: &Aliases) -> AvroResult<()>{
+      
+        let fullname = name.fullname(Option::None);
+        if self.defined_names.contains(&fullname) {
+            return Err(Details::NameCollision(fullname.clone()).into());
+        }
+
+        self.defined_names.push(fullname); 
 
         let namespace = &name.namespace;
 
         if let Some(aliases) = aliases {
-            aliases.iter().for_each(|alias| {
-                let alias_fullname = alias.fully_qualified_name(namespace);
-                self.resolving_schemas
-                    .insert(alias_fullname, resolving_schema.clone());
-            });
+            for alias in aliases {
+                let alias_fullname = alias.fully_qualified_name(namespace).fullname(Option::None);
+                if self.defined_names.contains(&alias_fullname) {
+                    return Err(Details::NameCollision(alias_fullname.clone()).into());
+                }
+                self.defined_names.push(alias_fullname); 
+            }
+            return Ok(());
         }
-    }
 
-    fn register_parsed_schema(
-        &mut self,
-        fully_qualified_name: &Name,
-        schema: &Schema,
-        aliases: &Aliases,
-    ) {
-        // FIXME, this should be globally aware, so if there is something overwriting something
-        // else then there is an ambiguous schema definition. An appropriate error should be thrown
-        self.parsed_schemas
-            .insert(fully_qualified_name.clone(), schema.clone());
-        self.resolving_schemas.remove(fully_qualified_name);
-
-        let namespace = &fully_qualified_name.namespace;
-
-        if let Some(aliases) = aliases {
-            aliases.iter().for_each(|alias| {
-                let alias_fullname = alias.fully_qualified_name(namespace);
-                self.resolving_schemas.remove(&alias_fullname);
-                self.parsed_schemas.insert(alias_fullname, schema.clone());
-            });
-        }
+        Ok(())
     }
 
     /// Returns already parsed schema or a schema that is currently being resolved.
@@ -1830,17 +1816,7 @@ impl Parser {
         complex: &Map<String, Value>,
         enclosing_namespace: &Namespace,
     ) -> Option<&Schema> {
-        match complex.get("type") {
-            Some(Value::String(typ)) => {
-                let name = Name::new(typ.as_str())
-                    .unwrap()
-                    .fully_qualified_name(enclosing_namespace);
-                self.resolving_schemas
-                    .get(&name)
-                    .or_else(|| self.parsed_schemas.get(&name))
-            }
-            _ => None,
-        }
+        None
     }
 
     /// Parse a `serde_json::Value` representing a Avro record type into a
@@ -1863,7 +1839,7 @@ impl Parser {
 
         let mut lookup = BTreeMap::new();
 
-        self.register_resolving_schema(&fully_qualified_name, &aliases);
+        self.check_and_register_name_and_aliases(&fully_qualified_name, &aliases)?;
 
         debug!("Going to parse record schema: {:?}", &fully_qualified_name);
 
@@ -1902,7 +1878,6 @@ impl Parser {
             attributes: self.get_custom_attributes(complex, vec!["fields"]),
         });
 
-        self.register_parsed_schema(&fully_qualified_name, &schema, &aliases);
         Ok(schema)
     }
 
@@ -1939,6 +1914,8 @@ impl Parser {
 
         let fully_qualified_name = Name::parse(complex, enclosing_namespace)?;
         let aliases = fix_aliases_namespace(complex.aliases(), &fully_qualified_name.namespace);
+
+        self.check_and_register_name_and_aliases(&fully_qualified_name, &aliases)?;
 
         let symbols: Vec<String> = symbols_opt
             .and_then(|v| v.as_array())
@@ -1993,8 +1970,6 @@ impl Parser {
             default,
             attributes: self.get_custom_attributes(complex, vec!["symbols"]),
         });
-
-        self.register_parsed_schema(&fully_qualified_name, &schema, &aliases);
 
         Ok(schema)
     }
@@ -2107,6 +2082,8 @@ impl Parser {
         let fully_qualified_name = Name::parse(complex, enclosing_namespace)?;
         let aliases = fix_aliases_namespace(complex.aliases(), &fully_qualified_name.namespace);
 
+        self.check_and_register_name_and_aliases(&fully_qualified_name, &aliases)?;
+
         let schema = Schema::Fixed(FixedSchema {
             name: fully_qualified_name.clone(),
             aliases: aliases.clone(),
@@ -2115,8 +2092,6 @@ impl Parser {
             default,
             attributes: self.get_custom_attributes(complex, vec!["size"]),
         });
-
-        self.register_parsed_schema(&fully_qualified_name, &schema, &aliases);
 
         Ok(schema)
     }
