@@ -1096,7 +1096,7 @@ enum RecordSchemaParseLocation {
 
 #[derive(Default)]
 struct Parser {
-    input_schemas: HashMap<Name, Value>,
+    input_schema: Value,
     /// A map of name -> Schema::Ref
     /// Used to resolve cyclic references, i.e. when a
     /// field's type is a reference to its record's type
@@ -1159,78 +1159,12 @@ impl Schema {
     /// If two of the input schemas have the same fullname, an Error will be returned.
     pub fn parse_list(input: impl IntoIterator<Item = impl AsRef<str>>) -> AvroResult<Vec<Schema>> {
         let input = input.into_iter();
-        let input_len = input.size_hint().0;
-        let mut input_schemas: HashMap<Name, Value> = HashMap::with_capacity(input_len);
-        let mut input_order: Vec<Name> = Vec::with_capacity(input_len);
-        for json in input {
-            let json = json.as_ref();
-            let schema: Value = serde_json::from_str(json).map_err(Details::ParseSchemaJson)?;
-            if let Value::Object(inner) = &schema {
-                let name = Name::parse(inner, &None)?;
-                let previous_value = input_schemas.insert(name.clone(), schema);
-                if previous_value.is_some() {
-                    return Err(Details::NameCollision(name.fullname(None)).into());
-                }
-                input_order.push(name);
-            } else {
-                return Err(Details::GetNameField.into());
-            }
-        }
-        let mut parser = Parser {
-            input_schemas,
-            defined_names: Vec::new(), 
-            input_order,
-            parsed_schemas: HashMap::with_capacity(input_len),
-        };
-        parser.parse_list()
+        input.map(|str| {
+            let mut parser = Parser::default();
+            parser.parse_str(str.as_ref())            
+        }).collect()
     }
 
-    /// Create a `Schema` from a string representing a JSON Avro schema,
-    /// along with an array of `Schema`'s from a list of named JSON Avro schemas (Record, Enum, and
-    /// Fixed).
-    ///
-    /// It is allowed that the schemas have cross-dependencies; these will be resolved
-    /// during parsing.
-    ///
-    /// If two of the named input schemas have the same fullname, an Error will be returned.
-    ///
-    /// # Arguments
-    /// * `schema` - the JSON string of the schema to parse
-    /// * `schemata` - a slice of additional schemas that is used to resolve cross-references
-    pub fn parse_str_with_list(
-        schema: &str,
-        schemata: impl IntoIterator<Item = impl AsRef<str>>,
-    ) -> AvroResult<(Schema, Vec<Schema>)> {
-        let schemata = schemata.into_iter();
-        let schemata_len = schemata.size_hint().0;
-        let mut input_schemas: HashMap<Name, Value> = HashMap::with_capacity(schemata_len);
-        let mut input_order: Vec<Name> = Vec::with_capacity(schemata_len);
-        for json in schemata {
-            let json = json.as_ref();
-            let schema: Value = serde_json::from_str(json).map_err(Details::ParseSchemaJson)?;
-            if let Value::Object(inner) = &schema {
-                let name = Name::parse(inner, &None)?;
-                if let Some(_previous) = input_schemas.insert(name.clone(), schema) {
-                    return Err(Details::NameCollision(name.fullname(None)).into());
-                }
-                input_order.push(name);
-            } else {
-                return Err(Details::GetNameField.into());
-            }
-        }
-        let mut parser = Parser {
-            input_schemas,
-            defined_names: Vec::new(), 
-            input_order,
-            parsed_schemas: HashMap::with_capacity(schemata_len),
-        };
-        parser.parse_input_schemas()?;
-
-        let value = serde_json::from_str(schema).map_err(Details::ParseSchemaJson)?;
-        let schema = parser.parse(&value, &None)?;
-        let schemata = parser.parse_list()?;
-        Ok((schema, schemata))
-    }
 
     /// Create a `Schema` from a reader which implements [`Read`].
     pub fn parse_reader(reader: &mut (impl Read + ?Sized)) -> AvroResult<Schema> {
@@ -1244,18 +1178,6 @@ impl Schema {
     /// Parses an Avro schema from JSON.
     pub fn parse(value: &Value) -> AvroResult<Schema> {
         let mut parser = Parser::default();
-        parser.parse(value, &None)
-    }
-
-    /// Parses an Avro schema from JSON.
-    /// Any `Schema::Ref`s must be known in the `names` map.
-    pub(crate) fn parse_with_names(value: &Value, names: Names) -> AvroResult<Schema> {
-        let mut parser = Parser {
-            input_schemas: HashMap::with_capacity(1),
-            defined_names: Vec::new(), 
-            input_order: Vec::with_capacity(1),
-            parsed_schemas: names,
-        };
         parser.parse(value, &None)
     }
 
@@ -1421,37 +1343,6 @@ impl Parser {
     fn parse_str(&mut self, input: &str) -> Result<Schema, Error> {
         let value = serde_json::from_str(input).map_err(Details::ParseSchemaJson)?;
         self.parse(&value, &None)
-    }
-
-    /// Create an array of `Schema`'s from an iterator of JSON Avro schemas. It is allowed that
-    /// the schemas have cross-dependencies; these will be resolved during parsing.
-    fn parse_list(&mut self) -> Result<Vec<Schema>, Error> {
-        self.parse_input_schemas()?;
-
-        let mut parsed_schemas = Vec::with_capacity(self.parsed_schemas.len());
-        for name in self.input_order.drain(0..) {
-            let parsed = self
-                .parsed_schemas
-                .remove(&name)
-                .expect("One of the input schemas was unexpectedly not parsed");
-            parsed_schemas.push(parsed);
-        }
-        Ok(parsed_schemas)
-    }
-
-    /// Convert the input schemas to parsed_schemas
-    fn parse_input_schemas(&mut self) -> Result<(), Error> {
-        for next_name in &self.input_order.clone(){
-            if self.parsed_schemas.contains_key(next_name) {continue};
-            let (name, value) = self
-                .input_schemas
-                .remove_entry(&next_name)
-                .expect("Key unexpectedly missing");
-            let parsed = self.parse(&value, &None)?;
-            self.parsed_schemas
-                .insert(get_schema_type_name(name, value), parsed);
-        }
-        Ok(())
     }
 
     /// Create a `Schema` from a `serde_json::Value` representing a JSON Avro
