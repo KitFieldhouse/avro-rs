@@ -1712,15 +1712,6 @@ impl Parser {
         Ok(())
     }
 
-    /// Returns already parsed schema or a schema that is currently being resolved.
-    fn get_already_seen_schema(
-        &self,
-        complex: &Map<String, Value>,
-        enclosing_namespace: &Namespace,
-    ) -> Option<&Schema> {
-        None
-    }
-
     /// Parse a `serde_json::Value` representing a Avro record type into a
     /// `Schema`.
     fn parse_record(
@@ -1729,12 +1720,6 @@ impl Parser {
         enclosing_namespace: &Namespace,
     ) -> AvroResult<Schema> {
         let fields_opt = complex.get("fields");
-
-        if fields_opt.is_none()
-            && let Some(seen) = self.get_already_seen_schema(complex, enclosing_namespace)
-        {
-            return Ok(seen.clone());
-        }
 
         let fully_qualified_name = Name::parse(complex, enclosing_namespace)?;
         let aliases = fix_aliases_namespace(complex.aliases(), &fully_qualified_name.namespace);
@@ -1807,12 +1792,6 @@ impl Parser {
         enclosing_namespace: &Namespace,
     ) -> AvroResult<Schema> {
         let symbols_opt = complex.get("symbols");
-
-        if symbols_opt.is_none()
-            && let Some(seen) = self.get_already_seen_schema(complex, enclosing_namespace)
-        {
-            return Ok(seen.clone());
-        }
 
         let fully_qualified_name = Name::parse(complex, enclosing_namespace)?;
         let aliases = fix_aliases_namespace(complex.aliases(), &fully_qualified_name.namespace);
@@ -1951,11 +1930,6 @@ impl Parser {
         enclosing_namespace: &Namespace,
     ) -> AvroResult<Schema> {
         let size_opt = complex.get("size");
-        if size_opt.is_none()
-            && let Some(seen) = self.get_already_seen_schema(complex, enclosing_namespace)
-        {
-            return Ok(seen.clone());
-        }
 
         let doc = complex.get("doc").and_then(|v| match &v {
             &Value::String(docstr) => Some(docstr.clone()),
