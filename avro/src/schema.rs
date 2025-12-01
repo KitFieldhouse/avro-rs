@@ -41,6 +41,7 @@ use std::{
     hash::Hash,
     io::Read,
     str::FromStr,
+    rc::Rc,
 };
 use strum_macros::{Display, EnumDiscriminants, EnumString};
 
@@ -71,12 +72,12 @@ impl fmt::Display for SchemaFingerprint {
 
 pub struct SchemaWithSymbols{
     /// schema fullnames defined in this schema.
-    defined_names: HashSet<Name>,
+    pub(crate) defined_names: HashMap<Name, Rc<Schema>>,
     /// all schema fullnames references in this schema, both those that have 
     /// an internal resolution and those that are internally unresolved.
-    referenced_names: HashSet<Name>, 
+    pub(crate) referenced_names: HashSet<Name>, 
     /// The parseed schema tree
-    schema: Schema
+    pub(crate) schema: Rc<Schema>
 }
 
 /// Represents any valid Avro schema
@@ -1041,11 +1042,16 @@ enum RecordSchemaParseLocation {
     FromField,
 }
 
+enum ReservedSchema {
+    Reserved,
+    Completed(Rc<Schema>)
+}
+
 #[derive(Default)]
 struct Parser {
     /// Keeps track of the names defined for this schema, as well as where it is located 
     /// in the schema tree
-    defined_names: HashSet<Name>,
+    defined_names: HashMap<Name, ReservedSchema>,
     /// Keeps track of the names references by this schema, as well as where they are located
     /// in the schema tree
     referenced_names: HashSet<Name> 
@@ -1247,10 +1253,17 @@ impl Parser {
     fn parse_str(mut self, input: &str) -> Result<SchemaWithSymbols, Error> {
         let value = serde_json::from_str(input).map_err(Details::ParseSchemaJson)?;
         let schema = self.parse(&value, &None)?;
+        let defined_names : HashMap<Name, Rc<Schema>> = HashMap::from_iter(self.defined_names.iter().map(|(key, val)| {
+            match val {
+                ReservedSchema::Reserved => {panic!("reserved schema encountred that was not provided a definition")}
+                ReservedSchema::Completed(schema_ref) => (key.clone(), schema_ref.clone())
+            }
+        }));
+
         Ok(SchemaWithSymbols{
-            defined_names: self.defined_names,
+            defined_names, 
             referenced_names: self.referenced_names,
-            schema: schema
+            schema: Rc::new(schema)
         }) 
     }
 
@@ -1557,13 +1570,14 @@ impl Parser {
         }
     }
     
-    /// Adds a fullname and all of its aliases to the names defined by this schema.
-    /// Checks for collisions and, if found, returns an error.
-    fn check_and_register_name_and_aliases(&mut self, name: &Name, aliases: &Aliases) -> AvroResult<()>{
+    /// checks if a fullname or its aliases have been registered with the parser yet. If so, fails
+    /// on NameCollision, else, reserves spots in the defined_names map that will be filled in when 
+    /// the definition is complete.
+    fn check_and_reserve_name_and_aliases(&mut self, name: &Name, aliases: &Aliases) -> AvroResult<()>{
       
-        if !self.defined_names.insert(name.clone()){
+        if let Option::None = self.defined_names.insert(name.clone(), ReservedSchema::Reserved) {
+        }else{
             return Err(Details::NameCollision(name.fullname(Option::None).clone()).into());
-
         }
 
         let namespace = &name.namespace;
@@ -1571,11 +1585,37 @@ impl Parser {
         if let Some(aliases) = aliases {
             for alias in aliases {
                 let alias_name = alias.fully_qualified_name(namespace);
-                if !self.defined_names.insert(alias_name.clone()) {
+
+                if let Option::None = self.defined_names.insert(alias_name.clone(), ReservedSchema::Reserved) {
+                }else{
                     return Err(Details::NameCollision(alias_name.fullname(Option::None).clone()).into());
                 }
             }
-            return Ok(());
+        }
+
+        Ok(())
+    }
+    
+    /// adds the completed parsed schema into a spot previously reserved via
+    /// check_and_reserve_name_and_aliases
+    fn insert_parsed_for_reserved(&mut self, name: &Name, aliases: &Aliases, schema: &Rc<Schema>) -> AvroResult<()>{
+        
+        if let Some(ReservedSchema::Reserved) = self.defined_names.insert(name.clone(), ReservedSchema::Completed(Rc::clone(schema))) {
+        }else{
+            panic!("Attempting to write into a spot that has not been reserved!"); // TODO: IMPROVE THIS MESSAGE
+        }
+
+        let namespace = &name.namespace;
+
+        if let Some(aliases) = aliases {
+            for alias in aliases {
+                let alias_name = alias.fully_qualified_name(namespace);
+
+                if let Some(ReservedSchema::Reserved) = self.defined_names.insert(alias_name.clone(), ReservedSchema::Completed(Rc::clone(schema))) {
+                }else{
+                    panic!("Attempting to write into a spot that has not been reserved!"); // TODO: IMPROVE THIS MESSAGE
+                }
+            }
         }
 
         Ok(())
@@ -1595,7 +1635,7 @@ impl Parser {
 
         let mut lookup = BTreeMap::new();
 
-        self.check_and_register_name_and_aliases(&fully_qualified_name, &aliases)?;
+        self.check_and_reserve_name_and_aliases(&fully_qualified_name, &aliases)?;
 
         debug!("Going to parse record schema: {:?}", &fully_qualified_name);
 
@@ -1633,8 +1673,9 @@ impl Parser {
             lookup,
             attributes: self.get_custom_attributes(complex, vec!["fields"]),
         });
-
-        Ok(schema)
+        
+        self.insert_parsed_for_reserved(&fully_qualified_name, &aliases, &Rc::new(schema));
+        Ok(Schema::Ref{name: fully_qualified_name})
     }
 
     fn get_custom_attributes(
@@ -1665,7 +1706,7 @@ impl Parser {
         let fully_qualified_name = Name::parse(complex, enclosing_namespace)?;
         let aliases = fix_aliases_namespace(complex.aliases(), &fully_qualified_name.namespace);
 
-        self.check_and_register_name_and_aliases(&fully_qualified_name, &aliases)?;
+        self.check_and_reserve_name_and_aliases(&fully_qualified_name, &aliases)?;
 
         let symbols: Vec<String> = symbols_opt
             .and_then(|v| v.as_array())
@@ -1721,7 +1762,8 @@ impl Parser {
             attributes: self.get_custom_attributes(complex, vec!["symbols"]),
         });
 
-        Ok(schema)
+        self.insert_parsed_for_reserved(&fully_qualified_name, &aliases, &Rc::new(schema));
+        Ok(Schema::Ref { name: fully_qualified_name })
     }
 
     /// Parse a `serde_json::Value` representing a Avro array type into a
@@ -1827,7 +1869,7 @@ impl Parser {
         let fully_qualified_name = Name::parse(complex, enclosing_namespace)?;
         let aliases = fix_aliases_namespace(complex.aliases(), &fully_qualified_name.namespace);
 
-        self.check_and_register_name_and_aliases(&fully_qualified_name, &aliases)?;
+        self.check_and_reserve_name_and_aliases(&fully_qualified_name, &aliases)?;
 
         let schema = Schema::Fixed(FixedSchema {
             name: fully_qualified_name.clone(),
@@ -1838,7 +1880,9 @@ impl Parser {
             attributes: self.get_custom_attributes(complex, vec!["size"]),
         });
 
-        Ok(schema)
+        self.insert_parsed_for_reserved(&fully_qualified_name, &aliases, &Rc::new(schema));
+
+        Ok(Schema::Ref{name: fully_qualified_name})
     }
 }
 
