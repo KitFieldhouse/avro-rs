@@ -41,6 +41,8 @@ use std::{
     hash::Hash,
     io::Read,
     str::FromStr,
+    rc::Rc,
+    cell::RefCell,
 };
 use strum_macros::{Display, EnumDiscriminants, EnumString};
 
@@ -63,6 +65,20 @@ impl fmt::Display for SchemaFingerprint {
                 .join("")
         )
     }
+}
+
+/// Represents a parsed Avro schema with information on 
+/// what named schemata are exposed by the schema as well 
+/// as schemata names used and defined by this schema.
+
+pub struct SchemaWithSymbols{
+    /// schema fullnames defined in this schema.
+    defined_names: HashSet<Name>,
+    /// all schema fullnames references in this schema, both those that have 
+    /// an internal resolution and those that are internally unresolved.
+    referenced_names: HashSet<Name>, 
+    /// The parseed schema tree
+    schema: Schema
 }
 
 /// Represents any valid Avro schema
@@ -1029,15 +1045,12 @@ enum RecordSchemaParseLocation {
 
 #[derive(Default)]
 struct Parser {
-    input_schema: Value,
-    /// A map of name -> Schema::Ref
-    /// Used to resolve cyclic references, i.e. when a
-    /// field's type is a reference to its record's type
-    defined_names: Vec<String>,
-    input_order: Vec<Name>,
-    /// A map of name -> fully parsed Schema
-    /// Used to avoid parsing the same schema twice
-    parsed_schemas: Names,
+    /// Keeps track of the names defined for this schema, as well as where it is located 
+    /// in the schema tree
+    defined_names: HashSet<Name>,
+    /// Keeps track of the names references by this schema, as well as where they are located
+    /// in the schema tree
+    referenced_names: HashSet<Name> 
 }
 
 impl Schema {
@@ -1232,9 +1245,15 @@ impl Schema {
 
 impl Parser {
     /// Create a `Schema` from a string representing a JSON Avro schema.
-    fn parse_str(&mut self, input: &str) -> Result<Schema, Error> {
+    /// Consumes the parser in the process.
+    fn parse_str(mut self, input: &str) -> Result<SchemaWithSymbols, Error> {
         let value = serde_json::from_str(input).map_err(Details::ParseSchemaJson)?;
-        self.parse(&value, &None)
+        let schema = self.parse(&value, &None)?;
+        Ok(SchemaWithSymbols{
+            defined_names: self.defined_names,
+            referenced_names: self.referenced_names,
+            schema: schema
+        }) 
     }
 
     /// Create a `Schema` from a `serde_json::Value` representing a JSON Avro
@@ -1270,16 +1289,8 @@ impl Parser {
             _ => self.fetch_schema_ref(name, enclosing_namespace),
         }
     }
-
-    /// Given a name, tries to retrieve the parsed schema from `parsed_schemas`.
-    /// If a parsed schema is not found, it checks if a currently resolving
-    /// schema with that name exists.
-    /// If a resolving schema is not found, it checks if a json with that name exists
-    /// in `input_schemas` and then parses it (removing it from `input_schemas`)
-    /// and adds the parsed schema to `parsed_schemas`.
-    ///
-    /// This method allows schemas definitions that depend on other types to
-    /// parse their dependencies (or look them up if already parsed).
+    
+    /// Registers that we are referencing a schema by name
     fn fetch_schema_ref(
         &mut self,
         name: &str,
@@ -1287,6 +1298,7 @@ impl Parser {
     ) -> AvroResult<Schema> {
         let name = Name::new(name)?;
         let fully_qualified_name = name.fully_qualified_name(enclosing_namespace);
+        self.referenced_names.insert(fully_qualified_name.clone());
         Ok(Schema::Ref { name: fully_qualified_name })
     }
 
@@ -1546,25 +1558,24 @@ impl Parser {
             None => Err(Details::GetComplexTypeField.into()),
         }
     }
-
+    
+    /// Adds a fullname and all of its aliases to the names defined by this schema.
+    /// Checks for collisions and, if found, returns an error.
     fn check_and_register_name_and_aliases(&mut self, name: &Name, aliases: &Aliases) -> AvroResult<()>{
       
-        let fullname = name.fullname(Option::None);
-        if self.defined_names.contains(&fullname) {
-            return Err(Details::NameCollision(fullname.clone()).into());
-        }
+        if !self.defined_names.insert(name.clone()){
+            return Err(Details::NameCollision(name.fullname(Option::None).clone()).into());
 
-        self.defined_names.push(fullname); 
+        }
 
         let namespace = &name.namespace;
 
         if let Some(aliases) = aliases {
             for alias in aliases {
-                let alias_fullname = alias.fully_qualified_name(namespace).fullname(Option::None);
-                if self.defined_names.contains(&alias_fullname) {
-                    return Err(Details::NameCollision(alias_fullname.clone()).into());
+                let alias_name = alias.fully_qualified_name(namespace);
+                if !self.defined_names.insert(alias_name.clone()) {
+                    return Err(Details::NameCollision(alias_name.fullname(Option::None).clone()).into());
                 }
-                self.defined_names.push(alias_fullname); 
             }
             return Ok(());
         }
