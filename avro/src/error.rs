@@ -88,6 +88,11 @@ pub enum Details {
     #[error("Two schemas with the same fullname were given: {0:?}")]
     NameCollision(String),
 
+    /// Error for when we are redefining schemata that already exists in 
+    /// a resolving context
+    #[error("Schamata with fullnames: {0:?}, already have definitions in this context.")]
+    MultipleNameCollision(Vec<String>),
+
     #[error("Not a fixed or bytes type, required for decimal schema, got: {0:?}")]
     ResolveDecimalSchema(SchemaKind),
 
