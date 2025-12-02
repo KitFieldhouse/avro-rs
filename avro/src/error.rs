@@ -547,6 +547,11 @@ pub enum Details {
     #[error("Unresolved schema reference: {0}")]
     SchemaResolutionError(Name),
 
+    /// Error while attempting to resolve schemata
+    /// in a ResolvedContext
+    #[error("Unresolved schema references: {0:?}")]
+    MultipleSchemaResolutionError(Vec<Name>),
+
     #[error("The file metadata is already flushed.")]
     FileHeaderAlreadyWritten,
 
