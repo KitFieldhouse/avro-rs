@@ -41,7 +41,7 @@ use std::{
     hash::Hash,
     io::Read,
     str::FromStr,
-    rc::Rc,
+    sync::Arc
 };
 use strum_macros::{Display, EnumDiscriminants, EnumString};
 
@@ -72,12 +72,12 @@ impl fmt::Display for SchemaFingerprint {
 
 pub struct SchemaWithSymbols{
     /// schema fullnames defined in this schema.
-    pub(crate) defined_names: HashMap<Name, Rc<Schema>>,
+    pub(crate) defined_names: HashMap<Arc<Name>, Arc<Schema>>,
     /// all schema fullnames references in this schema, both those that have 
     /// an internal resolution and those that are internally unresolved.
-    pub(crate) referenced_names: HashSet<Name>, 
+    pub(crate) referenced_names: HashSet<Arc<Name>>, 
     /// The parseed schema tree
-    pub(crate) schema: Rc<Schema>
+    pub(crate) schema: Arc<Schema>
 }
 
 /// Represents any valid Avro schema
@@ -151,7 +151,7 @@ pub enum Schema {
     /// An amount of time defined by a number of months, days and milliseconds.
     Duration(FixedSchema),
     /// A reference to another schema.
-    Ref { name: Name },
+    Ref { name: Arc<Name> },
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -389,11 +389,11 @@ impl<'de> Deserialize<'de> for Name {
 /// Newtype pattern for `Name` to better control the `serde_json::Value` representation.
 /// Aliases are serialized as an array of plain strings in the JSON representation.
 #[derive(Clone, Debug, Hash, PartialEq, Eq)]
-pub struct Alias(Name);
+pub struct Alias(Arc<Name>);
 
 impl Alias {
     pub fn new(name: &str) -> AvroResult<Self> {
-        Name::new(name).map(Self)
+        Name::new(name).map(|val| {Alias(Arc::new(val))})
     }
 
     pub fn name(&self) -> String {
@@ -832,7 +832,7 @@ impl RecordField {
 #[derive(bon::Builder, Debug, Clone)]
 pub struct RecordSchema {
     /// The name of the schema
-    pub name: Name,
+    pub name: Arc<Name>,
     /// The aliases of the schema
     #[builder(default)]
     pub aliases: Aliases,
@@ -853,7 +853,7 @@ pub struct RecordSchema {
 #[derive(bon::Builder, Debug, Clone)]
 pub struct EnumSchema {
     /// The name of the schema
-    pub name: Name,
+    pub name: Arc<Name>,
     /// The aliases of the schema
     #[builder(default)]
     pub aliases: Aliases,
@@ -873,7 +873,7 @@ pub struct EnumSchema {
 #[derive(bon::Builder, Debug, Clone)]
 pub struct FixedSchema {
     /// The name of the schema
-    pub name: Name,
+    pub name: Arc<Name>,
     /// The aliases of the schema
     #[builder(default)]
     pub aliases: Aliases,
@@ -1111,17 +1111,17 @@ enum RecordSchemaParseLocation {
 
 enum ReservedSchema {
     Reserved,
-    Completed(Rc<Schema>)
+    Completed(Arc<Schema>)
 }
 
 #[derive(Default)]
 struct Parser {
     /// Keeps track of the names defined for this schema, as well as where it is located 
     /// in the schema tree
-    defined_names: HashMap<Name, ReservedSchema>,
+    defined_names: HashMap<Arc<Name>, ReservedSchema>,
     /// Keeps track of the names references by this schema, as well as where they are located
     /// in the schema tree
-    referenced_names: HashSet<Name> 
+    referenced_names: HashSet<Arc<Name>> 
 }
 
 impl Schema {
@@ -1234,7 +1234,7 @@ impl Schema {
     }
 
     /// Returns the name of the schema if it has one.
-    pub fn name(&self) -> Option<&Name> {
+    pub fn name(&self) -> Option<Arc<Name>> {
         match self {
             Schema::Ref { name, .. }
             | Schema::Record(RecordSchema { name, .. })
@@ -1245,7 +1245,7 @@ impl Schema {
                 ..
             })
             | Schema::Uuid(UuidSchema::Fixed(FixedSchema { name, .. }))
-            | Schema::Duration(FixedSchema { name, .. }) => Some(name),
+            | Schema::Duration(FixedSchema { name, .. }) => Some(Arc::clone(name)),
             _ => None,
         }
     }
@@ -1330,7 +1330,7 @@ impl Schema {
                     denorm.denormalize(schemata)?;
                     *self = denorm;
                 } else {
-                    return Err(Details::SchemaResolutionError(name.clone()).into());
+                    return Err(Details::SchemaResolutionError(name.as_ref().clone()).into());
                 }
             }
             Schema::Record(record_schema) => {
@@ -1361,7 +1361,7 @@ impl Parser {
     fn parse_str(mut self, input: &str) -> Result<SchemaWithSymbols, Error> {
         let value = serde_json::from_str(input).map_err(Details::ParseSchemaJson)?;
         let schema = self.parse(&value, &None)?;
-        let defined_names : HashMap<Name, Rc<Schema>> = HashMap::from_iter(self.defined_names.iter().map(|(key, val)| {
+        let defined_names : HashMap<Arc<Name>, Arc<Schema>> = HashMap::from_iter(self.defined_names.iter().map(|(key, val)| {
             match val {
                 ReservedSchema::Reserved => {panic!("reserved schema encountred that was not provided a definition")}
                 ReservedSchema::Completed(schema_ref) => (key.clone(), schema_ref.clone())
@@ -1371,7 +1371,7 @@ impl Parser {
         Ok(SchemaWithSymbols{
             defined_names, 
             referenced_names: self.referenced_names,
-            schema: Rc::new(schema)
+            schema: Arc::new(schema)
         }) 
     }
 
@@ -1416,8 +1416,8 @@ impl Parser {
         enclosing_namespace: &Namespace,
     ) -> AvroResult<Schema> {
         let name = Name::new(name)?;
-        let fully_qualified_name = name.fully_qualified_name(enclosing_namespace);
-        self.referenced_names.insert(fully_qualified_name.clone());
+        let fully_qualified_name = Arc::new(name.fully_qualified_name(enclosing_namespace));
+        self.referenced_names.insert(Arc::clone(&fully_qualified_name));
         Ok(Schema::Ref { name: fully_qualified_name })
     }
 
@@ -1702,22 +1702,22 @@ impl Parser {
     /// checks if a fullname or its aliases have been registered with the parser yet. If so, fails
     /// on NameCollision, else, reserves spots in the defined_names map that will be filled in when 
     /// the definition is complete.
-    fn check_and_reserve_name_and_aliases(&mut self, name: &Name, aliases: &Aliases) -> AvroResult<()>{
+    fn check_and_reserve_name_and_aliases(&mut self, name: &Arc<Name>, aliases: &Aliases) -> AvroResult<()>{
       
-        if let Option::None = self.defined_names.insert(name.clone(), ReservedSchema::Reserved) {
+        if let Option::None = self.defined_names.insert(Arc::clone(name), ReservedSchema::Reserved) {
         }else{
-            return Err(Details::NameCollision(name.fullname(Option::None).clone()).into());
+            return Err(Details::NameCollision(name.fullname(Option::None)).into());
         }
 
         let namespace = &name.namespace;
 
         if let Some(aliases) = aliases {
             for alias in aliases {
-                let alias_name = alias.fully_qualified_name(namespace);
+                let alias_name : Arc<Name> = Arc::new(alias.fully_qualified_name(namespace));
 
-                if let Option::None = self.defined_names.insert(alias_name.clone(), ReservedSchema::Reserved) {
+                if let Option::None = self.defined_names.insert(Arc::clone(&alias_name), ReservedSchema::Reserved) {
                 }else{
-                    return Err(Details::NameCollision(alias_name.fullname(Option::None).clone()).into());
+                    return Err(Details::NameCollision(alias_name.fullname(Option::None)).into());
                 }
             }
         }
@@ -1727,9 +1727,9 @@ impl Parser {
     
     /// adds the completed parsed schema into a spot previously reserved via
     /// check_and_reserve_name_and_aliases
-    fn insert_parsed_for_reserved(&mut self, name: &Name, aliases: &Aliases, schema: &Rc<Schema>) -> AvroResult<()>{
+    fn insert_parsed_for_reserved(&mut self, name: &Arc<Name>, aliases: &Aliases, schema: &Arc<Schema>) -> AvroResult<()>{
         
-        if let Some(ReservedSchema::Reserved) = self.defined_names.insert(name.clone(), ReservedSchema::Completed(Rc::clone(schema))) {
+        if let Some(ReservedSchema::Reserved) = self.defined_names.insert(Arc::clone(name), ReservedSchema::Completed(Arc::clone(schema))) {
         }else{
             panic!("Attempting to write into a spot that has not been reserved!"); // TODO: IMPROVE THIS MESSAGE
         }
@@ -1738,9 +1738,9 @@ impl Parser {
 
         if let Some(aliases) = aliases {
             for alias in aliases {
-                let alias_name = alias.fully_qualified_name(namespace);
+                let alias_name : Arc<Name> = Arc::new(alias.fully_qualified_name(namespace));
 
-                if let Some(ReservedSchema::Reserved) = self.defined_names.insert(alias_name.clone(), ReservedSchema::Completed(Rc::clone(schema))) {
+                if let Some(ReservedSchema::Reserved) = self.defined_names.insert(Arc::clone(&alias_name), ReservedSchema::Completed(Arc::clone(schema))) {
                 }else{
                     panic!("Attempting to write into a spot that has not been reserved!"); // TODO: IMPROVE THIS MESSAGE
                 }
@@ -1759,7 +1759,7 @@ impl Parser {
     ) -> AvroResult<Schema> {
         let fields_opt = complex.get("fields");
 
-        let fully_qualified_name = Name::parse(complex, enclosing_namespace)?;
+        let fully_qualified_name = Arc::new(Name::parse(complex, enclosing_namespace)?);
         let aliases = fix_aliases_namespace(complex.aliases(), &fully_qualified_name.namespace);
 
         let mut lookup = BTreeMap::new();
@@ -1795,7 +1795,7 @@ impl Parser {
         }
 
         let schema = Schema::Record(RecordSchema {
-            name: fully_qualified_name.clone(),
+            name: Arc::clone(&fully_qualified_name),
             aliases: aliases.clone(),
             doc: complex.doc(),
             fields,
@@ -1803,7 +1803,7 @@ impl Parser {
             attributes: self.get_custom_attributes(complex, vec!["fields"]),
         });
         
-        self.insert_parsed_for_reserved(&fully_qualified_name, &aliases, &Rc::new(schema));
+        self.insert_parsed_for_reserved(&fully_qualified_name, &aliases, &Arc::new(schema));
         Ok(Schema::Ref{name: fully_qualified_name})
     }
 
@@ -1832,7 +1832,7 @@ impl Parser {
     ) -> AvroResult<Schema> {
         let symbols_opt = complex.get("symbols");
 
-        let fully_qualified_name = Name::parse(complex, enclosing_namespace)?;
+        let fully_qualified_name = Arc::new(Name::parse(complex, enclosing_namespace)?);
         let aliases = fix_aliases_namespace(complex.aliases(), &fully_qualified_name.namespace);
 
         self.check_and_reserve_name_and_aliases(&fully_qualified_name, &aliases)?;
@@ -1883,7 +1883,7 @@ impl Parser {
         }
 
         let schema = Schema::Enum(EnumSchema {
-            name: fully_qualified_name.clone(),
+            name: Arc::clone(&fully_qualified_name),
             aliases: aliases.clone(),
             doc: complex.doc(),
             symbols,
@@ -1891,7 +1891,7 @@ impl Parser {
             attributes: self.get_custom_attributes(complex, vec!["symbols"]),
         });
 
-        self.insert_parsed_for_reserved(&fully_qualified_name, &aliases, &Rc::new(schema));
+        self.insert_parsed_for_reserved(&fully_qualified_name, &aliases, &Arc::new(schema));
         Ok(Schema::Ref { name: fully_qualified_name })
     }
 
@@ -1995,13 +1995,13 @@ impl Parser {
             }
         }
 
-        let fully_qualified_name = Name::parse(complex, enclosing_namespace)?;
+        let fully_qualified_name = Arc::new(Name::parse(complex, enclosing_namespace)?);
         let aliases = fix_aliases_namespace(complex.aliases(), &fully_qualified_name.namespace);
 
         self.check_and_reserve_name_and_aliases(&fully_qualified_name, &aliases)?;
 
         let schema = Schema::Fixed(FixedSchema {
-            name: fully_qualified_name.clone(),
+            name: Arc::clone(&fully_qualified_name),
             aliases: aliases.clone(),
             doc,
             size: size as usize,
@@ -2009,7 +2009,7 @@ impl Parser {
             attributes: self.get_custom_attributes(complex, vec!["size"]),
         });
 
-        self.insert_parsed_for_reserved(&fully_qualified_name, &aliases, &Rc::new(schema));
+        self.insert_parsed_for_reserved(&fully_qualified_name, &aliases, &Arc::new(schema));
 
         Ok(Schema::Ref{name: fully_qualified_name})
     }
@@ -2691,7 +2691,7 @@ mod tests {
                     name: Name {
                         name: "LongList".to_owned(),
                         namespace: None,
-                    },
+                    }.into(),
                 },
             ])?))
             .order(RecordFieldOrder::Ascending)
@@ -2750,16 +2750,16 @@ mod tests {
 
         let schema_c_expected = Schema::Record(
             RecordSchema::builder()
-                .name(Name::new("C")?)
+                .name(Name::new("C")?.into())
                 .fields(vec![
                     RecordField::builder()
                         .name("field_one".to_string())
                         .schema(Schema::Union(UnionSchema::new(vec![
                             Schema::Ref {
-                                name: Name::new("A")?,
+                                name: Name::new("A")?.into(),
                             },
                             Schema::Ref {
-                                name: Name::new("B")?,
+                                name: Name::new("B")?.into(),
                             },
                         ])?))
                         .build(),
@@ -2797,7 +2797,7 @@ mod tests {
             Schema::parse_str_with_list(schema_str_c, [schema_str_a, schema_str_b])?;
 
         let schema_a_expected = Schema::Record(RecordSchema {
-            name: Name::new("A")?,
+            name: Name::new("A")?.into(),
             aliases: None,
             doc: None,
             fields: vec![RecordField {
@@ -2815,7 +2815,7 @@ mod tests {
         });
 
         let schema_b_expected = Schema::Record(RecordSchema {
-            name: Name::new("B")?,
+            name: Name::new("B")?.into(),
             aliases: None,
             doc: None,
             fields: vec![RecordField {
@@ -2834,10 +2834,10 @@ mod tests {
 
         let schema_c_expected = Schema::Union(UnionSchema::new(vec![
             Schema::Ref {
-                name: Name::new("A")?,
+                name: Name::new("A")?.into(),
             },
             Schema::Ref {
-                name: Name::new("B")?,
+                name: Name::new("B")?.into(),
             },
         ])?);
 
@@ -2932,7 +2932,7 @@ mod tests {
                 let f1 = fields.first();
 
                 let ref_schema = Schema::Ref {
-                    name: Name::new("B")?,
+                    name: Name::new("B")?.into(),
                 };
                 assert_eq!(ref_schema, f1.unwrap().schema);
             }
@@ -2969,7 +2969,7 @@ mod tests {
             .clone();
 
         let schema_option_a_expected = Schema::Record(RecordSchema {
-            name: Name::new("OptionA")?,
+            name: Name::new("OptionA")?.into(),
             aliases: None,
             doc: None,
             fields: vec![RecordField {
@@ -2980,7 +2980,7 @@ mod tests {
                 schema: Schema::Union(UnionSchema::new(vec![
                     Schema::Null,
                     Schema::Ref {
-                        name: Name::new("A")?,
+                        name: Name::new("A")?.into(),
                     },
                 ])?),
                 order: RecordFieldOrder::Ignore,
@@ -3016,7 +3016,7 @@ mod tests {
         lookup.insert("b".to_owned(), 1);
 
         let expected = Schema::Record(RecordSchema {
-            name: Name::new("test")?,
+            name: Name::new("test")?.into(),
             aliases: None,
             doc: None,
             fields: vec![
@@ -3080,7 +3080,7 @@ mod tests {
         node_lookup.insert("label".to_owned(), 0);
 
         let expected = Schema::Record(RecordSchema {
-            name: Name::new("test")?,
+            name: Name::new("test")?.into(),
             aliases: None,
             doc: None,
             fields: vec![RecordField {
@@ -3089,7 +3089,7 @@ mod tests {
                 default: None,
                 aliases: None,
                 schema: Schema::Record(RecordSchema {
-                    name: Name::new("Node")?,
+                    name: Name::new("Node")?.into(),
                     aliases: None,
                     doc: None,
                     fields: vec![
@@ -3109,7 +3109,7 @@ mod tests {
                             default: None,
                             aliases: None,
                             schema: Schema::array(Schema::Ref {
-                                name: Name::new("Node")?,
+                                name: Name::new("Node")?.into(),
                             }),
                             order: RecordFieldOrder::Ascending,
                             position: 1,
@@ -3263,7 +3263,7 @@ mod tests {
             name: Name {
                 name: "LongList".to_owned(),
                 namespace: None,
-            },
+            }.into(),
             aliases: Some(vec![Alias::new("LinkedLongs").unwrap()]),
             doc: None,
             fields: vec![
@@ -3288,7 +3288,7 @@ mod tests {
                             name: Name {
                                 name: "LongList".to_owned(),
                                 namespace: None,
-                            },
+                            }.into(),
                         },
                     ])?),
                     order: RecordFieldOrder::Ascending,
@@ -3331,7 +3331,7 @@ mod tests {
             name: Name {
                 name: "record".to_owned(),
                 namespace: None,
-            },
+            }.into(),
             aliases: None,
             doc: None,
             fields: vec![
@@ -3354,7 +3354,7 @@ mod tests {
                         name: Name {
                             name: "record".to_owned(),
                             namespace: None,
-                        },
+                        }.into(),
                     },
                     order: RecordFieldOrder::Ascending,
                     position: 1,
@@ -3400,7 +3400,7 @@ mod tests {
             name: Name {
                 name: "record".to_owned(),
                 namespace: None,
-            },
+            }.into(),
             aliases: None,
             doc: None,
             fields: vec![
@@ -3411,7 +3411,7 @@ mod tests {
                     aliases: None,
                     schema: Schema::Enum(
                         EnumSchema::builder()
-                            .name(Name::new("enum")?)
+                            .name(Name::new("enum")?.into())
                             .symbols(vec![
                                 "one".to_string(),
                                 "two".to_string(),
@@ -3432,7 +3432,7 @@ mod tests {
                         name: Name {
                             name: "enum".to_owned(),
                             namespace: None,
-                        },
+                        }.into(),
                         aliases: None,
                         doc: None,
                         symbols: vec!["one".to_string(), "two".to_string(), "three".to_string()],
@@ -3483,7 +3483,7 @@ mod tests {
             name: Name {
                 name: "record".to_owned(),
                 namespace: None,
-            },
+            }.into(),
             aliases: None,
             doc: None,
             fields: vec![
@@ -3496,7 +3496,7 @@ mod tests {
                         name: Name {
                             name: "fixed".to_owned(),
                             namespace: None,
-                        },
+                        }.into(),
                         aliases: None,
                         doc: None,
                         size: 456,
@@ -3516,7 +3516,7 @@ mod tests {
                         name: Name {
                             name: "fixed".to_owned(),
                             namespace: None,
-                        },
+                        }.into(),
                         aliases: None,
                         doc: None,
                         size: 456,
@@ -3547,7 +3547,7 @@ mod tests {
         )?;
 
         let expected = Schema::Enum(EnumSchema {
-            name: Name::new("Suit")?,
+            name: Name::new("Suit")?.into(),
             aliases: None,
             doc: None,
             symbols: vec![
@@ -3592,7 +3592,7 @@ mod tests {
         let schema = Schema::parse_str(r#"{"type": "fixed", "name": "test", "size": 16}"#)?;
 
         let expected = Schema::Fixed(FixedSchema {
-            name: Name::new("test")?,
+            name: Name::new("test")?.into(),
             aliases: None,
             doc: None,
             size: 16_usize,
@@ -3612,7 +3612,7 @@ mod tests {
         )?;
 
         let expected = Schema::Fixed(FixedSchema {
-            name: Name::new("test")?,
+            name: Name::new("test")?.into(),
             aliases: None,
             doc: Some(String::from("FixedSchema documentation")),
             size: 16_usize,
@@ -4796,7 +4796,7 @@ mod tests {
         let schema = Schema::parse_str(schema_str)?;
 
         if let Schema::Record(RecordSchema { name, fields, .. }) = schema {
-            assert_eq!(name, Name::new("AccountEvent")?);
+            assert_eq!(name, Name::new("AccountEvent")?.into());
 
             let field = &fields[0];
             assert_eq!(&field.name, "NullableLongArray");
@@ -4959,7 +4959,7 @@ mod tests {
 
         match schema {
             Schema::Record(RecordSchema { name, fields, .. }) => {
-                assert_eq!(name, Name::new("Rec")?);
+                assert_eq!(name, Name::new("Rec")?.into());
                 assert_eq!(fields.len(), 1);
                 let field = &fields[0];
                 assert_eq!(&field.name, "field_one");
@@ -4989,7 +4989,7 @@ mod tests {
 
         match schema {
             Schema::Record(RecordSchema { name, fields, .. }) => {
-                assert_eq!(name, Name::new("union_schema_test")?);
+                assert_eq!(name, Name::new("union_schema_test")?.into());
                 assert_eq!(fields.len(), 1);
                 let field = &fields[0];
                 assert_eq!(&field.name, "a");
@@ -5028,7 +5028,7 @@ mod tests {
 
         match schema {
             Schema::Record(RecordSchema { name, fields, .. }) => {
-                assert_eq!(name, Name::new("union_schema_test")?);
+                assert_eq!(name, Name::new("union_schema_test")?.into());
                 assert_eq!(fields.len(), 1);
                 let field = &fields[0];
                 assert_eq!(&field.name, "a");
@@ -5066,7 +5066,7 @@ mod tests {
 
         match schema {
             Schema::Record(RecordSchema { name, fields, .. }) => {
-                assert_eq!(name, Name::new("union_schema_test")?);
+                assert_eq!(name, Name::new("union_schema_test")?.into());
                 assert_eq!(fields.len(), 1);
                 let field = &fields[0];
                 assert_eq!(&field.name, "a");
@@ -5105,7 +5105,7 @@ mod tests {
 
         match schema {
             Schema::Record(RecordSchema { name, fields, .. }) => {
-                assert_eq!(name, Name::new("union_schema_test")?);
+                assert_eq!(name, Name::new("union_schema_test")?.into());
                 assert_eq!(fields.len(), 1);
                 let field = &fields[0];
                 assert_eq!(&field.name, "a");
@@ -6557,7 +6557,7 @@ mod tests {
 
         // Test serialize enum attributes
         let schema = Schema::Enum(EnumSchema {
-            name: Name::new("a")?,
+            name: Name::new("a")?.into(),
             aliases: None,
             doc: None,
             symbols: vec![],
@@ -6572,7 +6572,7 @@ mod tests {
 
         // Test serialize fixed custom_attributes
         let schema = Schema::Fixed(FixedSchema {
-            name: Name::new("a")?,
+            name: Name::new("a")?.into(),
             aliases: None,
             doc: None,
             size: 1,
@@ -6587,7 +6587,7 @@ mod tests {
 
         // Test serialize record custom_attributes
         let schema = Schema::Record(RecordSchema {
-            name: Name::new("a")?,
+            name: Name::new("a")?.into(),
             aliases: None,
             doc: None,
             fields: vec![],
@@ -6721,7 +6721,7 @@ mod tests {
         assert_eq!(
             parse_result,
             Schema::Fixed(FixedSchema {
-                name: Name::new("FixedUUID")?,
+                name: Name::new("FixedUUID")?.into(),
                 aliases: None,
                 doc: None,
                 size: 6,
@@ -6835,7 +6835,7 @@ mod tests {
                 name: Name {
                     name: "LongList".to_owned(),
                     namespace: None,
-                },
+                }.into(),
                 aliases: Some(vec![Alias::new("LinkedLongs").unwrap()]),
                 doc: None,
                 fields: vec![RecordField {
@@ -6870,7 +6870,7 @@ mod tests {
             precision: 36,
             scale: 10,
             inner: InnerDecimalSchema::Fixed(FixedSchema {
-                name: Name::new("decimal_36_10").unwrap(),
+                name: Name::new("decimal_36_10").unwrap().into(),
                 aliases: None,
                 doc: None,
                 size: 16,
