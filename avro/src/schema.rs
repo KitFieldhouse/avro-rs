@@ -1255,7 +1255,7 @@ impl Parser {
         let schema = self.parse(&value, &None)?;
         let defined_names : HashMap<Arc<Name>, Arc<Schema>> = HashMap::from_iter(self.defined_names.iter().map(|(key, val)| {
             match val {
-                ReservedSchema::Reserved => {panic!("reserved schema encountred that was not provided a definition")}
+                ReservedSchema::Reserved => {panic!("reserved schema encountered that was not provided a definition")}
                 ReservedSchema::Completed(schema_ref) => (key.clone(), schema_ref.clone())
             }
         }));
