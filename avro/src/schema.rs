@@ -1253,10 +1253,10 @@ impl Parser {
     fn parse_str(mut self, input: &str) -> Result<SchemaWithSymbols, Error> {
         let value = serde_json::from_str(input).map_err(Details::ParseSchemaJson)?;
         let schema = self.parse(&value, &None)?;
-        let defined_names : HashMap<Arc<Name>, Arc<Schema>> = HashMap::from_iter(self.defined_names.iter().map(|(key, val)| {
+        let defined_names : HashMap<Arc<Name>, Arc<Schema>> = HashMap::from_iter(self.defined_names.drain().map(|(key, val)| {
             match val {
                 ReservedSchema::Reserved => {panic!("reserved schema encountered that was not provided a definition")}
-                ReservedSchema::Completed(schema_ref) => (key.clone(), schema_ref.clone())
+                ReservedSchema::Completed(schema_ref) => (key, schema_ref)
             }
         }));
 
@@ -1586,8 +1586,7 @@ impl Parser {
             for alias in aliases {
                 let alias_name : Arc<Name> = Arc::new(alias.fully_qualified_name(namespace));
 
-                if let Option::None = self.defined_names.insert(Arc::clone(&alias_name), ReservedSchema::Reserved) {
-                }else{
+                if let Option::Some(_) = self.defined_names.insert(Arc::clone(&alias_name), ReservedSchema::Reserved) {
                     return Err(Details::NameCollision(alias_name.fullname(Option::None)).into());
                 }
             }
@@ -1611,8 +1610,7 @@ impl Parser {
             for alias in aliases {
                 let alias_name : Arc<Name> = Arc::new(alias.fully_qualified_name(namespace));
 
-                if let Some(ReservedSchema::Reserved) = self.defined_names.insert(Arc::clone(&alias_name), ReservedSchema::Completed(Arc::clone(schema))) {
-                }else{
+                if let Option::None = self.defined_names.insert(Arc::clone(&alias_name), ReservedSchema::Completed(Arc::clone(schema))) {
                     panic!("Attempting to write into a spot that has not been reserved!"); // TODO: IMPROVE THIS MESSAGE
                 }
             }
