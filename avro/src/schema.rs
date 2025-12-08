@@ -80,6 +80,22 @@ pub struct SchemaWithSymbols{
     pub(crate) schema: Arc<Schema>
 }
 
+
+impl SchemaWithSymbols{
+    pub fn parse_str(input: &str) -> Result<SchemaWithSymbols,Error>{
+        let parser = Parser::default(); 
+        parser.parse_str(input)
+    }
+
+    pub fn parse_list(input: impl IntoIterator<Item = impl AsRef<str>>) -> AvroResult<Vec<SchemaWithSymbols>> {
+        let input = input.into_iter();
+        input.map(|str| {
+            let parser = Parser::default();
+            parser.parse_str(str.as_ref())            
+        }).collect()
+    }
+}
+
 /// Represents any valid Avro schema
 /// More information about Avro schemas can be found in the
 /// [Avro Specification](https://avro.apache.org/docs/current/specification/#schema-declaration)
@@ -1162,9 +1178,11 @@ impl Schema {
     }
 
     /// Create a `Schema` from a string representing a JSON Avro schema.
-    pub fn parse_str(input: &str) -> Result<SchemaWithSymbols, Error> {
-        let mut parser = Parser::default();
-        parser.parse_str(input)
+    /// Note: Unless a bare schema is needed, prefer using SchemaWithSymbols::parse_str
+    pub fn parse_str(input: &str) -> Result<Schema, Error> {
+        let parser = Parser::default();
+        let schema = parser.parse_str(input)?.schema.as_ref().clone();
+        Ok(schema)
     }
 
     /// Create an array of `Schema`'s from a list of named JSON Avro schemas (Record, Enum, and
@@ -1174,17 +1192,32 @@ impl Schema {
     /// during parsing.
     ///
     /// If two of the input schemas have the same fullname, an Error will be returned.
-    pub fn parse_list(input: impl IntoIterator<Item = impl AsRef<str>>) -> AvroResult<Vec<SchemaWithSymbols>> {
+    ///
+    /// Note: Unless a bare schema is needed, prefer using SchemaWithSymbols::parse_list
+    pub fn parse_list(input: impl IntoIterator<Item = impl AsRef<str>>) -> AvroResult<Vec<Schema>> {
         let input = input.into_iter();
-        input.map(|str| {
-            let mut parser = Parser::default();
+        
+        let parsed : Vec<AvroResult<SchemaWithSymbols>> = input.map(|str| {
+            let parser = Parser::default();
             parser.parse_str(str.as_ref())            
-        }).collect()
+        }).collect();
+      
+        let mut schemata = Vec::with_capacity(parsed.len());
+
+        for schem in parsed {
+                if let Err(err) = schem {
+                    return Err(err);
+                }else{
+                    schemata.push(schem.unwrap().schema.as_ref().clone()); 
+                }
+        };
+
+        return Ok(schemata)
     }
 
 
     /// Create a `Schema` from a reader which implements [`Read`].
-    pub fn parse_reader(reader: &mut (impl Read + ?Sized)) -> AvroResult<SchemaWithSymbols> {
+    pub fn parse_reader(reader: &mut (impl Read + ?Sized)) -> AvroResult<Schema> {
         let mut buf = String::new();
         match reader.read_to_string(&mut buf) {
             Ok(_) => Self::parse_str(&buf),
