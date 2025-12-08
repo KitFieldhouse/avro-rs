@@ -322,14 +322,7 @@ pub(crate) fn decode_internal<R: Read, S: Borrow<Schema>>(
 #[allow(clippy::expect_fun_call)]
 mod tests {
     use crate::{
-        Decimal,
-        decode::decode,
-        encode::{encode, tests::success},
-        schema::{DecimalSchema, FixedSchema, Schema},
-        types::{
-            Value,
-            Value::{Array, Int, Map},
-        },
+        decode::decode, encode::{encode, tests::success}, schema::{DecimalSchema, FixedSchema, Name, Schema}, types::Value::{self, Array, Int, Map}, Decimal
     };
     use apache_avro_test_helper::TestResult;
     use pretty_assertions::assert_eq;
@@ -382,7 +375,7 @@ mod tests {
         use num_bigint::ToBigInt;
         let inner = Box::new(Schema::Fixed(
             FixedSchema::builder()
-                .name(Name::new("decimal")?)
+                .name(Name::new("decimal")?.into())
                 .size(2)
                 .build(),
         ));
@@ -410,7 +403,7 @@ mod tests {
         use num_bigint::ToBigInt;
         let inner = Box::new(Schema::Fixed(FixedSchema {
             size: 13,
-            name: Name::new("decimal")?,
+            name: Name::new("decimal")?.into(),
             aliases: None,
             doc: None,
             default: None,
@@ -856,7 +849,7 @@ mod tests {
 
         let schema = Schema::Fixed(FixedSchema {
             size: 16,
-            name: "uuid".into(),
+            name: Name::new("uuid")?.into(),
             aliases: None,
             doc: None,
             default: None,
