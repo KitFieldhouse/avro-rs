@@ -359,14 +359,7 @@ pub(crate) fn decode_internal<R: Read, S: Borrow<Schema>>(
 mod tests {
     use crate::schema::{InnerDecimalSchema, UuidSchema};
     use crate::{
-        Decimal,
-        decode::decode,
-        encode::{encode, tests::success},
-        schema::{DecimalSchema, FixedSchema, Schema},
-        types::{
-            Value,
-            Value::{Array, Int, Map},
-        },
+        decode::decode, encode::{encode, tests::success}, schema::{DecimalSchema, FixedSchema, Name, Schema}, types::Value::{self, Array, Int, Map}, Decimal
     };
     use apache_avro_test_helper::TestResult;
     use pretty_assertions::assert_eq;
@@ -891,7 +884,7 @@ mod tests {
 
         let fixed = FixedSchema {
             size: 16,
-            name: "uuid".into(),
+            name: Name::new("uuid")?.into(),
             aliases: None,
             doc: None,
             default: None,

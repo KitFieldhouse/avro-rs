@@ -28,7 +28,7 @@ use crate::{
     util::{zig_i32, zig_i64},
 };
 use log::error;
-use std::{borrow::Borrow, collections::HashMap, io::Write};
+use std::{borrow::Borrow, collections::HashMap, io::Write, sync::Arc};
 
 /// Encode a `Value` into avro format.
 ///
@@ -968,7 +968,7 @@ pub(crate) mod tests {
     fn avro_3926_encode_decode_uuid_to_fixed_wrong_schema_size() -> TestResult {
         let schema = Schema::Fixed(FixedSchema {
             size: 15,
-            name: "uuid".into(),
+            name: Name{name: String::from("uuid"), namespace: Option::None}.into(),
             aliases: None,
             doc: None,
             default: None,

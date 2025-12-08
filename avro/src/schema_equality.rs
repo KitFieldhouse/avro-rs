@@ -377,11 +377,11 @@ mod tests {
     #[test]
     fn test_avro_3939_compare_named_schemata_with_different_names() {
         let schema_one = Schema::Ref {
-            name: Name::from("name1"),
+            name: Name::from("name1").into(),
         };
 
         let schema_two = Schema::Ref {
-            name: Name::from("name2"),
+            name: Name::from("name2").into(),
         };
 
         let specification_eq_res = SPECIFICATION_EQ.compare(&schema_one, &schema_two);
@@ -496,7 +496,7 @@ mod tests {
     #[test]
     fn test_avro_3939_compare_fixed_schemata() {
         let schema_one = Schema::Fixed(FixedSchema {
-            name: Name::from("fixed"),
+            name: Name::from("fixed").into(),
             doc: None,
             size: 10,
             default: None,
@@ -507,7 +507,7 @@ mod tests {
         assert!(!STRUCT_FIELD_EQ.compare(&schema_one, &Schema::Boolean));
 
         let schema_two = Schema::Fixed(FixedSchema {
-            name: Name::from("fixed"),
+            name: Name::from("fixed").into(),
             doc: None,
             size: 10,
             default: None,
@@ -531,7 +531,7 @@ mod tests {
     #[test]
     fn test_avro_3939_compare_enum_schemata() {
         let schema_one = Schema::Enum(EnumSchema {
-            name: Name::from("enum"),
+            name: Name::from("enum").into(),
             doc: None,
             symbols: vec!["A".to_string(), "B".to_string()],
             default: None,
@@ -542,7 +542,7 @@ mod tests {
         assert!(!STRUCT_FIELD_EQ.compare(&schema_one, &Schema::Boolean));
 
         let schema_two = Schema::Enum(EnumSchema {
-            name: Name::from("enum"),
+            name: Name::from("enum").into(),
             doc: None,
             symbols: vec!["A".to_string(), "B".to_string()],
             default: None,
@@ -566,13 +566,13 @@ mod tests {
     #[test]
     fn test_avro_3939_compare_ref_schemata() {
         let schema_one = Schema::Ref {
-            name: Name::from("ref"),
+            name: Name::from("ref").into(),
         };
         assert!(!SPECIFICATION_EQ.compare(&schema_one, &Schema::Boolean));
         assert!(!STRUCT_FIELD_EQ.compare(&schema_one, &Schema::Boolean));
 
         let schema_two = Schema::Ref {
-            name: Name::from("ref"),
+            name: Name::from("ref").into(),
         };
 
         let specification_eq_res = SPECIFICATION_EQ.compare(&schema_one, &schema_two);
@@ -591,7 +591,7 @@ mod tests {
     #[test]
     fn test_avro_3939_compare_record_schemata() {
         let schema_one = Schema::Record(RecordSchema {
-            name: Name::from("record"),
+            name: Name::from("record").into(),
             doc: None,
             fields: vec![RecordField {
                 name: "field".to_string(),
@@ -611,7 +611,7 @@ mod tests {
         assert!(!STRUCT_FIELD_EQ.compare(&schema_one, &Schema::Boolean));
 
         let schema_two = Schema::Record(RecordSchema {
-            name: Name::from("record"),
+            name: Name::from("record").into(),
             doc: None,
             fields: vec![RecordField {
                 name: "field".to_string(),

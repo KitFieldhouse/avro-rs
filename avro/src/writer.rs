@@ -992,7 +992,7 @@ mod tests {
     fn decimal_fixed() -> TestResult {
         let size = 30;
         let fixed = FixedSchema {
-            name: Name::new("decimal")?,
+            name: Name::new("decimal")?.into(),
             aliases: None,
             doc: None,
             size,
@@ -1033,7 +1033,7 @@ mod tests {
     #[test]
     fn duration() -> TestResult {
         let inner = Schema::Fixed(FixedSchema {
-            name: Name::new("duration")?,
+            name: Name::new("duration")?.into(),
             aliases: None,
             doc: None,
             size: 12,

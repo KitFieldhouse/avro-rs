@@ -1382,7 +1382,7 @@ mod tests {
             (
                 Value::Record(vec![("unknown_field_name".to_string(), Value::Null)]),
                 Schema::Record(RecordSchema {
-                    name: Name::new("record_name").unwrap(),
+                    name: Name::new("record_name").unwrap().into(),
                     aliases: None,
                     doc: None,
                     fields: vec![RecordField {
@@ -1404,7 +1404,7 @@ mod tests {
             (
                 Value::Record(vec![("field_name".to_string(), Value::Null)]),
                 Schema::Record(RecordSchema {
-                    name: Name::new("record_name").unwrap(),
+                    name: Name::new("record_name").unwrap().into(),
                     aliases: None,
                     doc: None,
                     fields: vec![RecordField {
@@ -1413,7 +1413,7 @@ mod tests {
                         default: None,
                         aliases: None,
                         schema: Schema::Ref {
-                            name: Name::new("missing").unwrap(),
+                            name: Name::new("missing").unwrap().into(),
                         },
                         order: RecordFieldOrder::Ignore,
                         position: 0,
@@ -1449,7 +1449,7 @@ mod tests {
     fn validate_fixed() -> TestResult {
         let schema = Schema::Fixed(FixedSchema {
             size: 4,
-            name: Name::new("some_fixed").unwrap(),
+            name: Name::new("some_fixed").unwrap().into(),
             aliases: None,
             doc: None,
             default: None,
@@ -1484,7 +1484,7 @@ mod tests {
     #[test]
     fn validate_enum() -> TestResult {
         let schema = Schema::Enum(EnumSchema {
-            name: Name::new("some_enum").unwrap(),
+            name: Name::new("some_enum").unwrap().into(),
             aliases: None,
             doc: None,
             symbols: vec![
@@ -1531,7 +1531,7 @@ mod tests {
         );
 
         let other_schema = Schema::Enum(EnumSchema {
-            name: Name::new("some_other_enum").unwrap(),
+            name: Name::new("some_other_enum").unwrap().into(),
             aliases: None,
             doc: None,
             symbols: vec![
@@ -1572,7 +1572,7 @@ mod tests {
         //    ]
         // }
         let schema = Schema::Record(RecordSchema {
-            name: Name::new("some_record").unwrap(),
+            name: Name::new("some_record").unwrap().into(),
             aliases: None,
             doc: None,
             fields: vec![
@@ -1819,7 +1819,7 @@ Field with name '"b"' is not a member of the map items"#,
                     precision: 10,
                     scale: 1,
                     inner: InnerDecimalSchema::Fixed(FixedSchema {
-                        name: Name::new("decimal").unwrap(),
+                        name: Name::new("decimal").unwrap().into(),
                         aliases: None,
                         size: 20,
                         doc: None,
@@ -3187,7 +3187,7 @@ Field with name '"b"' is not a member of the map items"#,
         let value = Value::Bytes(vec![97, 98, 99]);
         assert_eq!(
             value.resolve(&Schema::Fixed(FixedSchema {
-                name: "test".into(),
+                name: Name::new("test")?.into(),
                 aliases: None,
                 doc: None,
                 size: 3,
@@ -3201,7 +3201,7 @@ Field with name '"b"' is not a member of the map items"#,
         assert!(
             value
                 .resolve(&Schema::Fixed(FixedSchema {
-                    name: "test".into(),
+                    name: Name::new("test")?.into(),
                     aliases: None,
                     doc: None,
                     size: 3,
@@ -3215,7 +3215,7 @@ Field with name '"b"' is not a member of the map items"#,
         assert!(
             value
                 .resolve(&Schema::Fixed(FixedSchema {
-                    name: "test".into(),
+                    name: Name::new("test")?.into(),
                     aliases: None,
                     doc: None,
                     size: 3,
