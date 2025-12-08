@@ -545,20 +545,15 @@ pub enum Details {
     #[error("failed to convert avro float to json: {0}")]
     ConvertF64ToJson(f64),
 
-    /// Error while resolving Schema::Ref
+    /// Error while resolving Schema::Ref with error message 
+    /// from resolver implementation.
     #[error("Unresolved schema reference: {0}")]
-    SchemaResolutionError(Name),
+    SchemaResolutionError(Name, String),
 
-    /// Error while attempting to resolve schemata
-    /// in a ResolvedContext
-    #[error("Unresolved schema references: {0:?}")]
-    MultipleSchemaResolutionError(Vec<Name>),
-
-    /// Error while attempting to resolve schemata
-    /// with custom resolver
-    #[error("Unable to resolve schema with custom resolver. schema name: {0:?}, 
-        resolver message: {1:?}")]
-    CustomSchemaResolutionError(Name,String),
+    /// Resolver did not return schemata with expected name 
+    #[error("Custom resolver did not return schema definition for expected name. Expected name: {0:?}, Names 
+        received from resolver: {1:?}")]
+    CustomSchemaResolverMismatch(Name, Vec<Name>),
 
     #[error("The file metadata is already flushed.")]
     FileHeaderAlreadyWritten,
