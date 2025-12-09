@@ -545,10 +545,21 @@ pub enum Details {
     #[error("failed to convert avro float to json: {0}")]
     ConvertF64ToJson(f64),
 
-    /// Error while resolving Schema::Ref with error message 
-    /// from resolver implementation.
+    /// Error while resolving Schema::Ref
     #[error("Unresolved schema reference: {0}")]
-    SchemaResolutionError(Name, String),
+    SchemaResolutionError(Name),
+
+    /// Error while resolving Schema::Ref with message 
+    /// from resolver
+    #[error("Unresolved schema reference: {0}. Error message: {1}")]
+    SchemaResolutionErrorWithMsg(Name, String),
+
+    /// Error thrown when no schema with provided name 
+    /// is found in a ResolvedContext
+    #[error("Could not find schema with name: {0}. Note that lookups will 
+        not force a context to perform a full resolution step. If this is required, 
+        please add the schema to the context first.")]
+    SchemaLookupError(Name),
 
     /// Resolver did not return schemata with expected name 
     #[error("Custom resolver did not return schema definition for expected name. Expected name: {0:?}, Names 
