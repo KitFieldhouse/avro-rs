@@ -25,6 +25,7 @@ use crate::AvroResult;
 use crate::error::Details;
 use std::{collections::{HashMap, HashSet}, sync::Arc, iter::once};
 
+#[derive(Debug)]
 pub struct ResolvedContext<T: Resolver>{
        defined_names: HashMap<Arc<Name>,Arc<Schema>>,
        resolver: T
