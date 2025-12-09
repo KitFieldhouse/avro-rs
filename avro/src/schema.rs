@@ -192,6 +192,46 @@ impl PartialEq for Schema {
     }
 }
 
+impl From<Schema> for SchemaWithSymbols{
+    fn from(value: Schema) -> Self {
+        fn search(schema: &Arc<Schema>, defined_names: &mut HashMap<Arc<Name>, Arc<Schema>>, referenced_names: &mut HashSet<Arc<Name>> ) {
+            match schema.as_ref() {
+                Schema::Record(record_schema) => {
+                    defined_names.insert(Arc::clone(&record_schema.name), Arc::clone(schema));
+                },
+                Schema::Fixed(fixed_schema) => {
+                    defined_names.insert(Arc::clone(&fixed_schema.name), Arc::clone(schema));
+                },
+                Schema::Enum(enum_schema) => {
+                    defined_names.insert(Arc::clone(&enum_schema.name), Arc::clone(schema));
+                },
+                Schema::Ref{name} => {
+                    referenced_names.insert(Arc::clone(name));
+                },
+                _ => {}
+            }
+        }
+
+        let arc_schema = Arc::new(value);
+        let mut defined_names : HashMap<Arc<Name>, Arc<Schema>> = HashMap::new();
+        let mut referenced_names : HashSet<Arc<Name>> = HashSet::new();
+
+        search(&arc_schema, &mut defined_names, &mut referenced_names);
+
+        return Self{
+            defined_names,
+            referenced_names,
+            schema: arc_schema
+        }
+    }
+}
+
+impl From<SchemaWithSymbols> for Schema {
+    fn from(value: SchemaWithSymbols) -> Self {
+        value.schema.as_ref().clone()
+    }
+}
+
 impl SchemaKind {
     pub fn is_primitive(self) -> bool {
         matches!(
