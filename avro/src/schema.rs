@@ -70,6 +70,7 @@ impl fmt::Display for SchemaFingerprint {
 /// what named schemata are exposed by the schema as well 
 /// as schemata names used and defined by this schema.
 
+#[derive(Clone)]
 pub struct SchemaWithSymbols{
     /// schema fullnames defined in this schema.
     pub(crate) defined_names: HashMap<Arc<Name>, Arc<Schema>>,
@@ -223,12 +224,6 @@ impl From<Schema> for SchemaWithSymbols{
             referenced_names,
             schema: arc_schema
         }
-    }
-}
-
-impl From<SchemaWithSymbols> for Schema {
-    fn from(value: SchemaWithSymbols) -> Self {
-        value.schema.as_ref().clone()
     }
 }
 
