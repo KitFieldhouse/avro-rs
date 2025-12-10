@@ -43,7 +43,7 @@ impl<T : Resolver> ResolvedContext<T>{
             resolver: resolver 
         };
         
-       context.add_schemata_with_symbols(schemata_with_symbols)?;
+       context.add_schemata(schemata_with_symbols)?;
 
        Ok(context)
     }
@@ -121,11 +121,11 @@ impl<T : Resolver> ResolvedContext<T>{
     }
 
     /// Add schema with symbols into this context. No "dangling" references are allowed
-    pub fn add_schema_with_symbols(&mut self, schema_with_symbol: SchemaWithSymbols) -> AvroResult<()>{
-        self.add_schemata_with_symbols(once(schema_with_symbol))
+    pub fn add_schema(&mut self, schema_with_symbol: SchemaWithSymbols) -> AvroResult<()>{
+        self.add_schemata(once(schema_with_symbol))
     }
 
-    fn add_schemata_with_symbols(&mut self, schemata: impl Iterator<Item = SchemaWithSymbols>) -> AvroResult<()>{
+    pub fn add_schemata(&mut self, schemata: impl Iterator<Item = SchemaWithSymbols>) -> AvroResult<()>{
         let mut references : HashSet<Arc<Name>> = HashSet::new();
 
         for schema_with_symbol in schemata{
@@ -164,7 +164,7 @@ impl<T : Resolver> ResolvedContext<T>{
                             Vec::from_iter(schema_with_symbols.defined_names.keys().map(|key| {key.as_ref().clone()}))).into())
                 }
                 // matches, lets add to the cache and recursively resolve on this new schema
-                self.add_schema_with_symbols(schema_with_symbols)?;
+                self.add_schema(schema_with_symbols)?;
                 self.resolve_name(name) 
             },
             Err(msg) => {
