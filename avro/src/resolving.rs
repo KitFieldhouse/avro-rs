@@ -47,7 +47,7 @@ impl<T : Resolver> ResolvedContext<T>{
 
        Ok(context)
     }
-   
+
     /// TODO: work on documentation
     /// stitches the schema together into parsing canonical form and inlines all needed defintions
     /// from the context.
@@ -182,6 +182,13 @@ impl<T : Resolver> ResolvedContext<T>{
         } 
         Ok(self.defined_names.get(name).unwrap().as_ref().clone())
     }
+}
+
+/// Wrapper for containing a Schema that has been resolved in a given resolved context.
+/// Can only be constructed from a ResolutionContext.
+pub(crate) struct ResolvedSchema<'a, T : Resolver>{
+    schema: Arc<Schema>,
+    context: &'a ResolvedContext<T> 
 }
 
 /// trait for implementing a custom schema name resolver. For instance this 
