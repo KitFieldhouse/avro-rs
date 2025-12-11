@@ -17,84 +17,65 @@
 
 // Items used for handling and/or providing named schema resolution.
 
-// this struct is a context where 
-// each names schema reference *must*
-// have a resolution in the context.
 use crate::schema::{Schema, SchemaWithSymbols, Name,};
 use crate::AvroResult;
 use crate::error::Details;
 use std::{collections::{HashMap, HashSet}, sync::Arc, iter::once};
 
-#[derive(Debug)]
-pub struct ResolvedContext<T: Resolver>{
-       defined_names: HashMap<Arc<Name>,Arc<Schema>>,
-       resolver: T
+/// contians a schema with all of the schema
+/// definitions it needs to be completely resolved
+/// This type is a promise from the API that each named
+/// type in the schema has exactly one unique definition
+/// and every named reference in the schema can be uniquely
+/// resolved to one of these definitions.
+pub struct ResolvedSchema{
+    pub(crate) schema: Arc<Schema>,
+    pub(crate) context_definitions: HashMap<Arc<Name>,Arc<Schema>>
 }
 
-impl<T : Resolver> ResolvedContext<T>{
+// convenience types
+type NameMap = HashMap<Arc<Name>, Arc<Schema>>;
+type NameSet = HashSet<Arc<Name>>;
 
-    /// creates a new resolved context from the supplied schemata with symbols. The supplied schemata must be a
-    /// covering set of all referenced named schemata. If an external resolver is required, use 
-    /// new_from_schemata_with_symbols_with_resolver.
-    pub fn new(schemata_with_symbols: impl Iterator<Item = SchemaWithSymbols>, resolver: T) -> AvroResult<ResolvedContext<T>> {
+impl ResolvedSchema{
 
-       let mut context = ResolvedContext{
-            defined_names: HashMap::new(),
-            resolver: resolver 
+    /// Takes two vectors of schemata. Both of these vectors are checked that they form a complete
+    /// schema context in which there every named schema has a unique defition and every schema
+    /// reference can be uniquely resolved to one of these definitions. The first vector of
+    /// schemata are those in which we want the associated ResolvedSchema forms of the schema to be
+    /// returned. The second vector are schemata that are used for schema resolution, but do not
+    /// have their ResolvedSchema form returned.
+    pub fn from_schemata(to_resolve: Vec<SchemaWithSymbols> , schemata_with_symbols: Vec<SchemaWithSymbols>, resolver: &mut impl Resolver) -> AvroResult<Vec<ResolvedSchema>> {
+
+        let mut definined_names : NameMap = HashMap::new();
+
+        Self::add_schemata(&mut definined_names, to_resolve.iter().cloned().chain(schemata_with_symbols), resolver)?;
+
+
+        Ok(to_resolve.into_iter().map(|schema_with_symbols|{ResolvedSchema{
+                schema: schema_with_symbols.schema,
+                context_definitions: Self::copy_needed_definitions(&definined_names, schema_with_symbols.referenced_names)
+            }}).collect())
+    }
+
+    // convenience method for copying (pointer copy) ony the definitions we need for a given schema
+    fn copy_needed_definitions(defined_names: &NameMap, needed_references: HashSet<Arc<Name>>) -> NameMap {
+        let mut needed_defs : NameMap = HashMap::new();
+        for needed in needed_references{
+            if let Some(def) = defined_names.get(&needed){
+                needed_defs.insert(needed, Arc::clone(def));
+            }else{
+                panic!("Unable to find a definition of needed reference after a resolution step and did not error when I should have. This is an internal error");
+            }
         };
-        
-       context.add_schemata(schemata_with_symbols)?;
-
-       Ok(context)
+        needed_defs
     }
 
-    /// TODO: work on documentation
-    /// stitches the schema together into parsing canonical form and inlines all needed defintions
-    /// from the context.
-    pub fn independent_canonical_form(&self, schema: Schema, defined_schemata: &mut HashSet<Arc<Name>>) -> AvroResult<Schema>{
-        match schema {
-            Schema::Ref{ref name}=> {
-                if defined_schemata.contains(name) {Ok(schema)} else {
-                    defined_schemata.insert(Arc::clone(&name));
-                    Ok(self.independent_canonical_form(self.return_schema_by_name(name)?, defined_schemata)?)
-                }               
-            },
-            Schema::Record(mut record_schema) => {
-                defined_schemata.insert(Arc::clone(&record_schema.name));
-                for field in &mut record_schema.fields {
-                    field.schema = self.independent_canonical_form(field.schema.clone(), defined_schemata)?; 
-                };
-                Ok(Schema::Record(record_schema))
-            }
-            Schema::Array(array_schema) => {
-                Ok(self.independent_canonical_form(*array_schema.items ,defined_schemata)?)
-            }
-            Schema::Map(map_schema) => {
-                Ok(self.independent_canonical_form(*map_schema.types, defined_schemata)?)
-            }
-            Schema::Union(mut union_schema) => {
-                for el_schema in &mut union_schema.schemas {
-                    *el_schema = self.independent_canonical_form(el_schema.clone(), defined_schemata)?;
-                }
-                Ok(Schema::Union(union_schema))
-            },
-            Schema::Fixed(ref fixed_schema) => {
-                defined_schemata.insert(Arc::clone(&fixed_schema.name));
-                Ok(schema)
-            },
-            Schema::Enum(ref enum_schema) => {
-                defined_schemata.insert(Arc::clone(&enum_schema.name));
-                Ok(schema)
-            }
-            _ => {Ok(schema)}
-        }
-    }
-
-
-    fn check_if_conflicts<'a>(&self, names: impl Iterator<Item = &'a Arc<Name> >) -> AvroResult<()>{
+    // checks that the provided definition names do not conflict with existing definitions.
+    fn check_if_conflicts<'a>(defined_names: &NameMap, names: impl Iterator<Item = &'a Arc<Name> >) -> AvroResult<()>{
         let mut conflicting_fullnames : Vec<String> = Vec::new();
         for name in names{
-            if self.defined_names.contains_key(name){
+            if defined_names.contains_key(name){
                 conflicting_fullnames.push(name.fullname(Option::None));
             }
         }
@@ -105,57 +86,37 @@ impl<T : Resolver> ResolvedContext<T>{
             Err(Details::MultipleNameCollision(conflicting_fullnames).into())
         }
     }
-    
-    /// returns the names in the supplied iterator that are not defined in this context
-    fn find_unresolved(&self, names: impl Iterator<Item = Arc<Name>>) -> HashSet<Arc<Name>>{
 
-        let mut unresolved : HashSet<Arc<Name>> = HashSet::new();
-
-        for name in names {
-            if !self.defined_names.contains_key(&name){
-                unresolved.insert(name);
-            }
-        }
-
-        unresolved
-    }
-
-    /// Add schema with symbols into this context. No "dangling" references are allowed
-    pub fn add_schema(&mut self, schema_with_symbol: SchemaWithSymbols) -> AvroResult<()>{
-        self.add_schemata(once(schema_with_symbol))
-    }
-
-    pub fn add_schemata(&mut self, schemata: impl Iterator<Item = SchemaWithSymbols>) -> AvroResult<()>{
+    // add the list of schemata into the context.
+    fn add_schemata(defined_names: &mut NameMap, schemata: impl Iterator<Item = SchemaWithSymbols>, resolver: &mut impl Resolver) -> AvroResult<()>{
         let mut references : HashSet<Arc<Name>> = HashSet::new();
 
         for schema_with_symbol in schemata{
-            self.check_if_conflicts(schema_with_symbol.defined_names.keys())?;
-            self.defined_names.extend(schema_with_symbol.defined_names);
+            Self::check_if_conflicts(&defined_names, schema_with_symbol.defined_names.keys())?;
+            defined_names.extend(schema_with_symbol.defined_names);
             references.extend(schema_with_symbol.referenced_names);
         }
 
         for schema_ref in references{
-            self.resolve_name(&schema_ref)?;
+            Self::resolve_name(defined_names, &schema_ref, resolver)?;
         }
 
         Ok(())
 
     }
 
-    /// This method attempts to match the provided name with a schema definition in this context.
-    /// If the name resolves to a schema that requires additional resolutions, this is done
-    /// recursivly. TODO: fix up docs
-    /// 
-    fn resolve_name(&mut self, name: &Arc<Name>) -> AvroResult<&Arc<Schema>>{
+    // attempt to resolve the schema name, first from the known schema definitions, and if that
+    // fails, from the provided resolver.
+    fn resolve_name(defined_names: &mut NameMap, name: &Arc<Name>, resolver: &mut impl Resolver) -> AvroResult<()>{
        
-        // first, check internal cache
-        if self.defined_names.contains_key(name) {
-            return Ok(&self.defined_names.get(name).unwrap());
+        // first, check if can resolve internally
+        if defined_names.contains_key(name) {
+            return Ok(());
         }
          
         
         // second, use provided resolver
-        match self.resolver.find_schema(name){
+        match resolver.find_schema(name){
             Ok(schema_with_symbols) => {
 
                 // check that what we got back from the resolver actually matches what we expect
@@ -163,32 +124,70 @@ impl<T : Resolver> ResolvedContext<T>{
                     return Err(Details::CustomSchemaResolverMismatch(name.as_ref().clone(), 
                             Vec::from_iter(schema_with_symbols.defined_names.keys().map(|key| {key.as_ref().clone()}))).into())
                 }
-                // matches, lets add to the cache and recursively resolve on this new schema
-                self.add_schema(schema_with_symbols)?;
-                self.resolve_name(name) 
+                // matches, lets add this as a schemata that we should have, and recurse in
+                Self::add_schemata(defined_names, once(schema_with_symbols), resolver)?;
+                Ok(())
             },
             Err(msg) => {
                 return Err(Details::SchemaResolutionErrorWithMsg(name.as_ref().clone(), msg).into());
             }
         }
     }
-
-    /// Looks up the schema name in this context's cache. This is a convenience method that
-    /// simply handles generating an error message if no schema is found
-    /// Returns the schema if found.
-    fn return_schema_by_name(&self, name: &Arc<Name>) -> AvroResult<Schema>{
-        if !self.defined_names.contains_key(name) {
-            return Err(Details::SchemaLookupError(name.as_ref().clone()).into());
-        } 
-        Ok(self.defined_names.get(name).unwrap().as_ref().clone())
-    }
 }
 
-/// Wrapper for containing a Schema that has been resolved in a given resolved context.
-/// Can only be constructed from a ResolutionContext.
-pub(crate) struct ResolvedSchema<'a, T : Resolver>{
-    schema: Arc<Schema>,
-    context: &'a ResolvedContext<T> 
+/// this is a schema object that is "self contained" in that it contains all named definitions
+/// needed to encode/decode form this schema.
+pub struct CompleteSchema(Schema);
+
+impl From<ResolvedSchema> for CompleteSchema{
+    fn from(value: ResolvedSchema) -> Self {
+
+        fn unravel(schema: &mut Schema, defined_schemata: &NameMap, placed_schemata: &mut NameSet){
+            match schema {
+                Schema::Ref{name}=> {
+                    if !placed_schemata.contains(name) {
+                        let mut definition = defined_schemata.get(name).unwrap().as_ref().clone();
+                        unravel(&mut definition, defined_schemata, placed_schemata);
+                        *schema = definition;
+                    }
+                },
+                Schema::Record(record_schema) => {
+                    if !placed_schemata.insert(Arc::clone(&record_schema.name)) {
+                        panic!("When converting to complete schema, attempted to double define a schema when unraveling");
+                    }
+                    for field in &mut record_schema.fields {
+                       unravel(&mut field.schema, defined_schemata, placed_schemata);
+                    }
+                }
+                Schema::Array(array_schema) => {
+                    unravel(&mut array_schema.items, defined_schemata, placed_schemata);
+                }
+                Schema::Map(map_schema) => {
+                    unravel(map_schema.types.as_mut(), defined_schemata, placed_schemata);
+                }
+                Schema::Union(union_schema) => {
+                    for mut el_schema in &mut union_schema.schemas {
+                        unravel(&mut el_schema, defined_schemata, placed_schemata);
+                    }
+                },
+                Schema::Fixed(fixed_schema) => {
+                    if !placed_schemata.insert(Arc::clone(&fixed_schema.name)) {
+                        panic!("When converting to complete schema, attempted to double define a schema when unraveling");
+                    }
+                },
+                Schema::Enum(enum_schema) => {
+                    if !placed_schemata.insert(Arc::clone(&enum_schema.name)) {
+                        panic!("When converting to complete schema, attempted to double define a schema when unraveling");
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        let mut schema = value.schema.as_ref().clone();
+        unravel(&mut schema, &value.context_definitions, &mut HashSet::new());
+        CompleteSchema(schema)
+    }
 }
 
 /// trait for implementing a custom schema name resolver. For instance this 
@@ -203,4 +202,16 @@ impl Resolver for DefaultResolver{
     fn find_schema(&mut self, _name: &Arc<Name>) -> Result<SchemaWithSymbols, String> {
        Err(String::from("Definition not found, no custom resolver was given for ResolutionContext")) 
     }
+}
+
+// TODO: need to fill out tests! Doh!
+#[cfg(test)]
+mod tests{
+    use apache_avro_test_helper::TestResult;
+
+    #[test]
+    fn test_resolution() -> TestResult{
+        Ok(())
+    }
+
 }
