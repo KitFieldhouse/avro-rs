@@ -45,11 +45,11 @@ impl ResolvedSchema{
     /// schemata are those in which we want the associated ResolvedSchema forms of the schema to be
     /// returned. The second vector are schemata that are used for schema resolution, but do not
     /// have their ResolvedSchema form returned.
-    pub fn from_schemata(to_resolve: Vec<SchemaWithSymbols> , schemata_with_symbols: Vec<SchemaWithSymbols>, resolver: &mut impl Resolver) -> AvroResult<Vec<ResolvedSchema>> {
+    pub fn from_schemata(to_resolve: Vec<SchemaWithSymbols> , schemata_with_symbols: Vec<SchemaWithSymbols>, mut resolver: Option<&mut impl Resolver>) -> AvroResult<Vec<ResolvedSchema>> {
 
         let mut definined_names : NameMap = HashMap::new();
 
-        Self::add_schemata(&mut definined_names, to_resolve.iter().cloned().chain(schemata_with_symbols), resolver)?;
+        Self::add_schemata(&mut definined_names, to_resolve.iter().cloned().chain(schemata_with_symbols), &mut resolver)?;
 
 
         Ok(to_resolve.into_iter().map(|schema_with_symbols|{ResolvedSchema{
@@ -88,7 +88,7 @@ impl ResolvedSchema{
     }
 
     // add the list of schemata into the context.
-    fn add_schemata(defined_names: &mut NameMap, schemata: impl Iterator<Item = SchemaWithSymbols>, resolver: &mut impl Resolver) -> AvroResult<()>{
+    fn add_schemata(defined_names: &mut NameMap, schemata: impl Iterator<Item = SchemaWithSymbols>, resolver: &mut Option<&mut impl Resolver>) -> AvroResult<()>{
         let mut references : HashSet<Arc<Name>> = HashSet::new();
 
         for schema_with_symbol in schemata{
@@ -107,29 +107,35 @@ impl ResolvedSchema{
 
     // attempt to resolve the schema name, first from the known schema definitions, and if that
     // fails, from the provided resolver.
-    fn resolve_name(defined_names: &mut NameMap, name: &Arc<Name>, resolver: &mut impl Resolver) -> AvroResult<()>{
+    fn resolve_name(defined_names: &mut NameMap, name: &Arc<Name>, resolver: &mut Option<&mut impl Resolver>) -> AvroResult<()>{
        
         // first, check if can resolve internally
         if defined_names.contains_key(name) {
             return Ok(());
         }
-         
-        
-        // second, use provided resolver
-        match resolver.find_schema(name){
-            Ok(schema_with_symbols) => {
 
-                // check that what we got back from the resolver actually matches what we expect
-                if !schema_with_symbols.defined_names.contains_key(name) {
-                    return Err(Details::CustomSchemaResolverMismatch(name.as_ref().clone(), 
-                            Vec::from_iter(schema_with_symbols.defined_names.keys().map(|key| {key.as_ref().clone()}))).into())
+        // if not, and we have no resolver, throw a resolution error. If we have a provided
+        // resolver, apply that
+        match resolver{
+            Option::None => {Err(Details::SchemaResolutionError(name.as_ref().clone()).into())}
+            Option::Some(resolver_provider)=>{
+                // second, use provided resolver
+                match resolver_provider.find_schema(name){
+                    Ok(schema_with_symbols) => {
+
+                        // check that what we got back from the resolver actually matches what we expect
+                        if !schema_with_symbols.defined_names.contains_key(name) {
+                            return Err(Details::CustomSchemaResolverMismatch(name.as_ref().clone(),
+                                    Vec::from_iter(schema_with_symbols.defined_names.keys().map(|key| {key.as_ref().clone()}))).into())
+                        }
+                        // matches, lets add this as a schemata that we should have, and recurse in
+                        Self::add_schemata(defined_names, once(schema_with_symbols), resolver)?;
+                        Ok(())
+                    },
+                    Err(msg) => {
+                        return Err(Details::SchemaResolutionErrorWithMsg(name.as_ref().clone(), msg).into());
+                    }
                 }
-                // matches, lets add this as a schemata that we should have, and recurse in
-                Self::add_schemata(defined_names, once(schema_with_symbols), resolver)?;
-                Ok(())
-            },
-            Err(msg) => {
-                return Err(Details::SchemaResolutionErrorWithMsg(name.as_ref().clone(), msg).into());
             }
         }
     }
@@ -195,13 +201,6 @@ impl From<ResolvedSchema> for CompleteSchema{
 /// from a shcema registry.
 pub trait Resolver{
     fn find_schema(&mut self, name: &Arc<Name>) -> Result<SchemaWithSymbols, String>;
-}
-
-pub struct DefaultResolver{}
-impl Resolver for DefaultResolver{
-    fn find_schema(&mut self, _name: &Arc<Name>) -> Result<SchemaWithSymbols, String> {
-       Err(String::from("Definition not found, no custom resolver was given for ResolutionContext")) 
-    }
 }
 
 // TODO: need to fill out tests! Doh!
