@@ -29,8 +29,8 @@ use std::{collections::{HashMap, HashSet}, sync::Arc, iter::once};
 /// and every named reference in the schema can be uniquely
 /// resolved to one of these definitions.
 pub struct ResolvedSchema{
-    pub(crate) schema: Arc<Schema>,
-    pub(crate) context_definitions: HashMap<Arc<Name>,Arc<Schema>>
+    pub schema: Arc<Schema>,
+    context_definitions: HashMap<Arc<Name>,Arc<Schema>>
 }
 
 // convenience types
@@ -138,6 +138,10 @@ impl ResolvedSchema{
                 return Err(Details::SchemaResolutionErrorWithMsg(name.as_ref().clone(), msg).into());
             }
         }
+    }
+
+    pub fn get_context_definitions(&self) -> &NameMap{
+       &self.context_definitions
     }
 }
 
