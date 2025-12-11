@@ -19,7 +19,7 @@
 
 use crate::schema::{Schema, SchemaWithSymbols, Name,};
 use crate::AvroResult;
-use crate::error::Details;
+use crate::error::{Details,Error};
 use std::{collections::{HashMap, HashSet}, sync::Arc, iter::once};
 
 /// contians a schema with all of the schema
@@ -190,6 +190,15 @@ impl From<ResolvedSchema> for CompleteSchema{
     }
 }
 
+impl TryFrom<SchemaWithSymbols> for ResolvedSchema{
+    type Error = Error;
+
+    fn try_from(schema: SchemaWithSymbols) -> AvroResult<Self> {
+        let resolved_schema = ResolvedSchema::from_schemata(vec![schema], Vec::new(), &mut DefaultResolver::new())?.pop().unwrap();
+        Ok(resolved_schema)
+    }
+}
+
 /// trait for implementing a custom schema name resolver. For instance this 
 /// could be used to create resolvers that lookup schema names 
 /// from a shcema registry.
@@ -201,6 +210,12 @@ pub struct DefaultResolver{}
 impl Resolver for DefaultResolver{
     fn find_schema(&mut self, _name: &Arc<Name>) -> Result<SchemaWithSymbols, String> {
        Err(String::from("Definition not found, no custom resolver was given for ResolutionContext")) 
+    }
+}
+
+impl DefaultResolver{
+    fn new()->Self{
+        DefaultResolver{}
     }
 }
 
