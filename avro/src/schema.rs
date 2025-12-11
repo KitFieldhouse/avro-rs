@@ -195,34 +195,53 @@ impl PartialEq for Schema {
 
 impl From<Schema> for SchemaWithSymbols{
     fn from(value: Schema) -> Self {
-        fn search(schema: &Arc<Schema>, defined_names: &mut HashMap<Arc<Name>, Arc<Schema>>, referenced_names: &mut HashSet<Arc<Name>> ) {
-            match schema.as_ref() {
-                Schema::Record(record_schema) => {
-                    defined_names.insert(Arc::clone(&record_schema.name), Arc::clone(schema));
+        fn transform(schema: Schema, defined_names: &mut HashMap<Arc<Name>, Arc<Schema>>, referenced_names: &mut HashSet<Arc<Name>>) -> Schema {
+            match schema {
+                Schema::Record(mut record_schema) => {
+                    for field in &mut record_schema.fields{
+                        field.schema = transform(field.schema.clone(), defined_names, referenced_names);
+                    };
+                    let name = Arc::clone(&record_schema.name);
+                    defined_names.insert(Arc::clone(&name), Arc::new(Schema::Record(record_schema)));
+                    Schema::Ref { name }
                 },
-                Schema::Fixed(fixed_schema) => {
-                    defined_names.insert(Arc::clone(&fixed_schema.name), Arc::clone(schema));
+                Schema::Array(mut array_schema) => {
+                    array_schema.items = Box::from(transform(*array_schema.items, defined_names, referenced_names));
+                    Schema::Array(array_schema)
+                }
+                Schema::Map(mut map_schema) => {
+                    map_schema.types = Box::from(transform(*map_schema.types, defined_names, referenced_names));
+                    Schema::Map(map_schema)
+                }
+                Schema::Union(mut union_schema) => {
+                    for el_schema in &mut union_schema.schemas {
+                        *el_schema = transform(el_schema.clone(), defined_names, referenced_names);
+                    }
+                    Schema::Union(union_schema)
                 },
-                Schema::Enum(enum_schema) => {
-                    defined_names.insert(Arc::clone(&enum_schema.name), Arc::clone(schema));
+                Schema::Fixed(ref fixed_schema) => {
+                    let name = Arc::clone(&fixed_schema.name);
+                    defined_names.insert(Arc::clone(&name), Arc::from(schema));
+                    Schema::Ref { name }
                 },
-                Schema::Ref{name} => {
-                    referenced_names.insert(Arc::clone(name));
+                Schema::Enum(ref enum_schema) => {
+                    let name = Arc::clone(&enum_schema.name);
+                    defined_names.insert(Arc::clone(&name), Arc::from(schema));
+                    Schema::Ref { name }
                 },
-                _ => {}
+                _ => {schema}
             }
         }
 
-        let arc_schema = Arc::new(value);
         let mut defined_names : HashMap<Arc<Name>, Arc<Schema>> = HashMap::new();
         let mut referenced_names : HashSet<Arc<Name>> = HashSet::new();
 
-        search(&arc_schema, &mut defined_names, &mut referenced_names);
+        let schema = transform(value , &mut defined_names, &mut referenced_names);
 
         return Self{
             defined_names,
             referenced_names,
-            schema: arc_schema
+            schema: Arc::new(schema)
         }
     }
 }
