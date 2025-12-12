@@ -19,8 +19,7 @@
 
 use serde::Serialize;
 
-use crate::schema::{Name, RecordField, RecordSchema, Schema, SchemaWithSymbols,
-    EnumSchema, MapSchema, ArraySchema, FixedSchema, UnionSchema, DecimalSchema};
+use crate::schema::{self, ArraySchema, DecimalSchema, EnumSchema, FixedSchema, MapSchema, Name, RecordField, RecordSchema, Schema, SchemaWithSymbols, UnionSchema};
 use crate::AvroResult;
 use crate::error::{Details,Error};
 use std::{collections::{HashMap, HashSet}, sync::Arc, iter::once, borrow::Borrow};
@@ -46,6 +45,11 @@ impl ResolvedSchema{
         let schemata_with_symbols = SchemaWithSymbols::parse_list(to_resolve.into_iter().chain(additional.into_iter()))?;
         let mut resolved = Self::from_schemata(schemata_with_symbols, Vec::new(), resolver)?;
         Ok(resolved.drain(0..to_resolve_len).collect())
+    }
+
+    pub fn parse_str(schema: impl AsRef<str>) -> AvroResult<ResolvedSchema>{
+        let schema = SchemaWithSymbols::parse_str(schema.as_ref())?;
+        ResolvedSchema::try_from(schema)
     }
 
     /// Takes two vectors of schemata. Both of these vectors are checked that they form a complete
