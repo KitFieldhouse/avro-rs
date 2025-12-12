@@ -25,6 +25,7 @@ use crate::{
         validate_enum_symbol_name, validate_namespace, validate_record_field_name,
         validate_schema_name,
     },
+    resolving::ResolvedSchema
 };
 use digest::Digest;
 use log::{debug, error, warn};
@@ -70,7 +71,7 @@ impl fmt::Display for SchemaFingerprint {
 /// what named schemata are exposed by the schema as well 
 /// as schemata names used and defined by this schema.
 
-#[derive(Clone)]
+#[derive(Clone,Debug)]
 pub struct SchemaWithSymbols{
     /// schema fullnames defined in this schema.
     pub(crate) defined_names: HashMap<Arc<Name>, Arc<Schema>>,
@@ -2526,7 +2527,7 @@ impl AvroSchemaComponent for core::time::Duration {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{error::Details, rabin::Rabin};
+    use crate::{error::Details, rabin::Rabin, resolving::CompleteSchema};
     use apache_avro_test_helper::{
         TestResult,
         logger::{assert_logged, assert_not_logged},
@@ -3871,11 +3872,10 @@ mod tests {
           ]
         }
         "#;
-        let schema = Schema::parse_str(schema)?;
-        let rs = ResolvedSchema::try_from(&schema).expect("Schema didn't successfully parse");
-        assert_eq!(rs.get_names().len(), 2);
+        let rs = ResolvedSchema::parse_str(schema)?;
+        assert_eq!(rs.get_context_definitions().len(), 2);
         for s in &["space.record_name", "space.inner_record_name"] {
-            assert!(rs.get_names().contains_key(&Name::new(s)?));
+            assert!(rs.get_context_definitions().contains_key(&Name::new(s)?));
         }
 
         Ok(())
@@ -3912,11 +3912,10 @@ mod tests {
           ]
         }
         "#;
-        let schema = Schema::parse_str(schema)?;
-        let rs = ResolvedSchema::try_from(&schema).expect("Schema didn't successfully parse");
-        assert_eq!(rs.get_names().len(), 2);
+        let rs = ResolvedSchema::parse_str(schema)?;
+        assert_eq!(rs.get_context_definitions().len(), 2);
         for s in &["space.record_name", "space.inner_record_name"] {
-            assert!(rs.get_names().contains_key(&Name::new(s)?));
+            assert!(rs.get_context_definitions().contains_key(&Name::new(s)?));
         }
 
         Ok(())
@@ -3948,11 +3947,10 @@ mod tests {
           ]
         }
         "#;
-        let schema = Schema::parse_str(schema)?;
-        let rs = ResolvedSchema::try_from(&schema).expect("Schema didn't successfully parse");
-        assert_eq!(rs.get_names().len(), 2);
+        let rs = ResolvedSchema::parse_str(schema)?;
+        assert_eq!(rs.get_context_definitions().len(), 2);
         for s in &["space.record_name", "space.inner_enum_name"] {
-            assert!(rs.get_names().contains_key(&Name::new(s)?));
+            assert!(rs.get_context_definitions().contains_key(&Name::new(s)?));
         }
 
         Ok(())
@@ -3984,11 +3982,10 @@ mod tests {
           ]
         }
         "#;
-        let schema = Schema::parse_str(schema)?;
-        let rs = ResolvedSchema::try_from(&schema).expect("Schema didn't successfully parse");
-        assert_eq!(rs.get_names().len(), 2);
+        let rs = ResolvedSchema::parse_str(schema)?;
+        assert_eq!(rs.get_context_definitions().len(), 2);
         for s in &["space.record_name", "space.inner_enum_name"] {
-            assert!(rs.get_names().contains_key(&Name::new(s)?));
+            assert!(rs.get_context_definitions().contains_key(&Name::new(s)?));
         }
 
         Ok(())
@@ -4020,11 +4017,10 @@ mod tests {
           ]
         }
         "#;
-        let schema = Schema::parse_str(schema)?;
-        let rs = ResolvedSchema::try_from(&schema).expect("Schema didn't successfully parse");
-        assert_eq!(rs.get_names().len(), 2);
+        let rs = ResolvedSchema::parse_str(schema)?;
+        assert_eq!(rs.get_context_definitions().len(), 2);
         for s in &["space.record_name", "space.inner_fixed_name"] {
-            assert!(rs.get_names().contains_key(&Name::new(s)?));
+            assert!(rs.get_context_definitions().contains_key(&Name::new(s)?));
         }
 
         Ok(())
@@ -4056,11 +4052,10 @@ mod tests {
           ]
         }
         "#;
-        let schema = Schema::parse_str(schema)?;
-        let rs = ResolvedSchema::try_from(&schema).expect("Schema didn't successfully parse");
-        assert_eq!(rs.get_names().len(), 2);
+        let rs = ResolvedSchema::parse_str(schema)?;
+        assert_eq!(rs.get_context_definitions().len(), 2);
         for s in &["space.record_name", "space.inner_fixed_name"] {
-            assert!(rs.get_names().contains_key(&Name::new(s)?));
+            assert!(rs.get_context_definitions().contains_key(&Name::new(s)?));
         }
 
         Ok(())
@@ -4098,11 +4093,10 @@ mod tests {
           ]
         }
         "#;
-        let schema = Schema::parse_str(schema)?;
-        let rs = ResolvedSchema::try_from(&schema).expect("Schema didn't successfully parse");
-        assert_eq!(rs.get_names().len(), 2);
+        let rs = ResolvedSchema::parse_str(schema)?;
+        assert_eq!(rs.get_context_definitions().len(), 2);
         for s in &["space.record_name", "inner_space.inner_record_name"] {
-            assert!(rs.get_names().contains_key(&Name::new(s)?));
+            assert!(rs.get_context_definitions().contains_key(&Name::new(s)?));
         }
 
         Ok(())
@@ -4135,11 +4129,10 @@ mod tests {
           ]
         }
         "#;
-        let schema = Schema::parse_str(schema)?;
-        let rs = ResolvedSchema::try_from(&schema).expect("Schema didn't successfully parse");
-        assert_eq!(rs.get_names().len(), 2);
+        let rs = ResolvedSchema::parse_str(schema)?;
+        assert_eq!(rs.get_context_definitions().len(), 2);
         for s in &["space.record_name", "inner_space.inner_enum_name"] {
-            assert!(rs.get_names().contains_key(&Name::new(s)?));
+            assert!(rs.get_context_definitions().contains_key(&Name::new(s)?));
         }
 
         Ok(())
@@ -4172,11 +4165,10 @@ mod tests {
           ]
         }
         "#;
-        let schema = Schema::parse_str(schema)?;
-        let rs = ResolvedSchema::try_from(&schema).expect("Schema didn't successfully parse");
-        assert_eq!(rs.get_names().len(), 2);
+        let rs = ResolvedSchema::parse_str(schema)?;
+        assert_eq!(rs.get_context_definitions().len(), 2);
         for s in &["space.record_name", "inner_space.inner_fixed_name"] {
-            assert!(rs.get_names().contains_key(&Name::new(s)?));
+            assert!(rs.get_context_definitions().contains_key(&Name::new(s)?));
         }
 
         Ok(())
@@ -4225,15 +4217,14 @@ mod tests {
           ]
         }
         "#;
-        let schema = Schema::parse_str(schema)?;
-        let rs = ResolvedSchema::try_from(&schema).expect("Schema didn't successfully parse");
-        assert_eq!(rs.get_names().len(), 3);
+        let rs = ResolvedSchema::parse_str(schema)?;
+        assert_eq!(rs.get_context_definitions().len(), 3);
         for s in &[
             "space.record_name",
             "space.middle_record_name",
             "space.inner_record_name",
         ] {
-            assert!(rs.get_names().contains_key(&Name::new(s)?));
+            assert!(rs.get_context_definitions().contains_key(&Name::new(s)?));
         }
 
         Ok(())
@@ -4283,15 +4274,14 @@ mod tests {
           ]
         }
         "#;
-        let schema = Schema::parse_str(schema)?;
-        let rs = ResolvedSchema::try_from(&schema).expect("Schema didn't successfully parse");
-        assert_eq!(rs.get_names().len(), 3);
+        let rs = ResolvedSchema::parse_str(schema)?;
+        assert_eq!(rs.get_context_definitions().len(), 3);
         for s in &[
             "space.record_name",
             "middle_namespace.middle_record_name",
             "middle_namespace.inner_record_name",
         ] {
-            assert!(rs.get_names().contains_key(&Name::new(s)?));
+            assert!(rs.get_context_definitions().contains_key(&Name::new(s)?));
         }
 
         Ok(())
@@ -4342,15 +4332,14 @@ mod tests {
           ]
         }
         "#;
-        let schema = Schema::parse_str(schema)?;
-        let rs = ResolvedSchema::try_from(&schema).expect("Schema didn't successfully parse");
-        assert_eq!(rs.get_names().len(), 3);
+        let rs = ResolvedSchema::parse_str(schema)?;
+        assert_eq!(rs.get_context_definitions().len(), 3);
         for s in &[
             "space.record_name",
             "middle_namespace.middle_record_name",
             "inner_namespace.inner_record_name",
         ] {
-            assert!(rs.get_names().contains_key(&Name::new(s)?));
+            assert!(rs.get_context_definitions().contains_key(&Name::new(s)?));
         }
 
         Ok(())
@@ -4387,11 +4376,10 @@ mod tests {
           ]
         }
         "#;
-        let schema = Schema::parse_str(schema)?;
-        let rs = ResolvedSchema::try_from(&schema).expect("Schema didn't successfully parse");
-        assert_eq!(rs.get_names().len(), 2);
+        let rs = ResolvedSchema::parse_str(schema)?;
+        assert_eq!(rs.get_context_definitions().len(), 2);
         for s in &["space.record_name", "space.in_array_record"] {
-            assert!(rs.get_names().contains_key(&Name::new(s)?));
+            assert!(rs.get_context_definitions().contains_key(&Name::new(s)?));
         }
 
         Ok(())
@@ -4428,11 +4416,10 @@ mod tests {
           ]
         }
         "#;
-        let schema = Schema::parse_str(schema)?;
-        let rs = ResolvedSchema::try_from(&schema).expect("Schema didn't successfully parse");
-        assert_eq!(rs.get_names().len(), 2);
+        let rs = ResolvedSchema::parse_str(schema)?;
+        assert_eq!(rs.get_context_definitions().len(), 2);
         for s in &["space.record_name", "space.in_map_record"] {
-            assert!(rs.get_names().contains_key(&Name::new(s)?));
+            assert!(rs.get_context_definitions().contains_key(&Name::new(s)?));
         }
 
         Ok(())
@@ -4465,19 +4452,19 @@ mod tests {
         ]
         }
         "#;
-        let schema = Schema::parse_str(schema)?;
+        let schema = SchemaWithSymbols::parse_str(schema)?;
         let rs = ResolvedSchema::try_from(&schema).expect("Schema didn't successfully parse");
 
         // confirm we have expected 2 full-names
-        assert_eq!(rs.get_names().len(), 2);
+        assert_eq!(rs.get_context_definitions().len(), 2);
         for s in &["space.record_name", "inner_space.inner_enum_name"] {
-            assert!(rs.get_names().contains_key(&Name::new(s)?));
+            assert!(rs.get_context_definitions().contains_key(&Name::new(s)?));
         }
 
         // convert Schema back to JSON string
-        let schema_str = serde_json::to_string(&schema).expect("test failed");
+        let schema_str = serde_json::to_string(&rs).expect("test failed");
         let _schema = Schema::parse_str(&schema_str).expect("test failed");
-        assert_eq!(schema, _schema);
+        assert_eq!(schema, _schema.into());
 
         Ok(())
     }
@@ -4509,19 +4496,19 @@ mod tests {
         ]
         }
         "#;
-        let schema = Schema::parse_str(schema)?;
-        let rs = ResolvedSchema::try_from(&schema).expect("Schema didn't successfully parse");
+        let schema = SchemaWithSymbols::parse_str(schema)?;
+        let rs = ResolvedSchema::try_from(schema.clone()).expect("Schema didn't successfully parse");
 
         // confirm we have expected 2 full-names
-        assert_eq!(rs.get_names().len(), 2);
+        assert_eq!(rs.get_context_definitions().len(), 2);
         for s in &["space.record_name", "inner_space.inner_fixed_name"] {
-            assert!(rs.get_names().contains_key(&Name::new(s)?));
+            assert!(rs.get_context_definitions().contains_key(&Name::new(s)?));
         }
 
         // convert Schema back to JSON string
-        let schema_str = serde_json::to_string(&schema).expect("test failed");
+        let schema_str = serde_json::to_string(&CompleteSchema::from(&rs)).expect("test failed");
         let _schema = Schema::parse_str(&schema_str).expect("test failed");
-        assert_eq!(schema, _schema);
+        assert_eq!(schema, _schema.into());
 
         Ok(())
     }
