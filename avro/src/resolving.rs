@@ -40,16 +40,28 @@ type NameMap = HashMap<Arc<Name>, Arc<Schema>>;
 type NameSet = HashSet<Arc<Name>>;
 
 impl ResolvedSchema{
-    pub fn from_strings<T : AsRef<str>>(to_resolve: Vec<T> , additional: Vec<T>, resolver: &mut impl Resolver) -> AvroResult<Vec<ResolvedSchema>>{
+    pub fn from_strings<T : AsRef<str>>(to_resolve: Vec<T> , additional: Vec<T>) -> AvroResult<Vec<ResolvedSchema>>{
+        Self::from_strings_with_resolver(to_resolve, additional, &mut DefaultResolver::new())
+    }
+
+    pub fn from_strings_with_resolver<T : AsRef<str>>(to_resolve: Vec<T> , additional: Vec<T>, resolver: &mut impl Resolver) -> AvroResult<Vec<ResolvedSchema>>{
         let to_resolve_len : usize = to_resolve.len();
         let schemata_with_symbols = SchemaWithSymbols::parse_list(to_resolve.into_iter().chain(additional.into_iter()))?;
-        let mut resolved = Self::from_schemata(schemata_with_symbols, Vec::new(), resolver)?;
+        let mut resolved = Self::from_schemata_with_resolver(schemata_with_symbols, Vec::new(), resolver)?;
         Ok(resolved.drain(0..to_resolve_len).collect())
     }
 
     pub fn parse_str(schema: impl AsRef<str>) -> AvroResult<ResolvedSchema>{
+        Self::parse_str_with_resolver(schema, &mut DefaultResolver::new())
+    }
+
+    pub fn parse_str_with_resolver(schema: impl AsRef<str>, resolver: &mut impl Resolver) -> AvroResult<ResolvedSchema>{
         let schema = SchemaWithSymbols::parse_str(schema.as_ref())?;
-        ResolvedSchema::try_from(schema)
+        Ok(Self::from_schemata_with_resolver(vec![schema],Vec::new(), resolver)?.pop().unwrap())
+    }
+
+    pub fn from_schemata(to_resolve: impl IntoIterator<Item = SchemaWithSymbols>, schemata_with_symbols: impl IntoIterator<Item = SchemaWithSymbols>) -> AvroResult<Vec<ResolvedSchema>>{
+        Self::from_schemata_with_resolver(to_resolve, schemata_with_symbols, &mut DefaultResolver::new())
     }
 
     /// Takes two vectors of schemata. Both of these vectors are checked that they form a complete
@@ -58,7 +70,7 @@ impl ResolvedSchema{
     /// schemata are those in which we want the associated ResolvedSchema forms of the schema to be
     /// returned. The second vector are schemata that are used for schema resolution, but do not
     /// have their ResolvedSchema form returned.
-    pub fn from_schemata(to_resolve: impl IntoIterator<Item = SchemaWithSymbols>, schemata_with_symbols: impl IntoIterator<Item = SchemaWithSymbols>, resolver: &mut impl Resolver) -> AvroResult<Vec<ResolvedSchema>> {
+    pub fn from_schemata_with_resolver(to_resolve: impl IntoIterator<Item = SchemaWithSymbols>, schemata_with_symbols: impl IntoIterator<Item = SchemaWithSymbols>, resolver: &mut impl Resolver) -> AvroResult<Vec<ResolvedSchema>> {
 
         let mut definined_names : NameMap = HashMap::new();
         let to_resolve : Vec<SchemaWithSymbols> = Vec::from_iter(to_resolve.into_iter());
@@ -246,7 +258,7 @@ impl TryFrom<SchemaWithSymbols> for ResolvedSchema{
     type Error = Error;
 
     fn try_from(schema: SchemaWithSymbols) -> AvroResult<Self> {
-        let resolved_schema = ResolvedSchema::from_schemata(vec![schema], Vec::new(), &mut DefaultResolver::new())?.pop().unwrap();
+        let resolved_schema = ResolvedSchema::from_schemata(vec![schema], Vec::new())?.pop().unwrap();
         Ok(resolved_schema)
     }
 }
@@ -255,7 +267,7 @@ impl TryFrom<&SchemaWithSymbols> for ResolvedSchema{
     type Error = Error;
 
     fn try_from(schema: &SchemaWithSymbols) -> AvroResult<Self> {
-        let resolved_schema = ResolvedSchema::from_schemata(vec![schema.clone()], Vec::new(), &mut DefaultResolver::new())?.pop().unwrap();
+        let resolved_schema = ResolvedSchema::from_schemata(vec![schema.clone()], Vec::new())?.pop().unwrap();
         Ok(resolved_schema)
     }
 }
@@ -274,7 +286,7 @@ impl Resolver for DefaultResolver{
 }
 
 impl DefaultResolver{
-    fn new()->Self{
+    pub fn new()->Self{
         DefaultResolver{}
     }
 }
