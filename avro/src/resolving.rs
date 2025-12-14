@@ -201,6 +201,17 @@ impl ResolvedSchema{
 /// needed to encode/decode form this schema.
 pub struct CompleteSchema(Schema);
 
+impl CompleteSchema{
+    /// Returns the [Parsing Canonical Form] of `self` that is self contained (not dependent on
+    /// any definitions in `schemata`)
+    ///
+    /// [Parsing Canonical Form]:
+    /// https://avro.apache.org/docs/current/specification/#parsing-canonical-form-for-schemas
+    pub fn independent_canonical_form(&self) -> Result<String, Error> {
+        Ok(self.0.canonical_form())
+    }
+}
+
 impl From<&ResolvedSchema> for CompleteSchema{
     fn from(value: &ResolvedSchema) -> Self {
 
