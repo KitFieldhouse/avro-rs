@@ -40,6 +40,16 @@ type NameMap = HashMap<Arc<Name>, Arc<Schema>>;
 type NameSet = HashSet<Arc<Name>>;
 
 impl ResolvedSchema{
+    pub fn from_str(input: impl AsRef<str>) -> AvroResult<ResolvedSchema>{
+        Self::from_str_with_resolver(input, &mut DefaultResolver::new())
+    }
+
+    pub fn from_str_with_resolver(input:  impl AsRef<str>, resolver: &mut impl Resolver) -> AvroResult<ResolvedSchema>{
+        let empty_additional : Vec<String> = Vec::new();
+        let [resolved] = Self::from_strings_array_with_resolver([input], empty_additional, resolver)?;
+        Ok(resolved)
+    }
+
     pub fn from_strings_array<const N : usize>(to_resolve: [impl AsRef<str>; N] , additional: impl IntoIterator<Item = impl AsRef<str>>) -> AvroResult<[ResolvedSchema; N]>{
         Self::from_strings_array_with_resolver(to_resolve, additional, &mut DefaultResolver::new())
     }
