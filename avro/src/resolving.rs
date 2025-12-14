@@ -215,11 +215,11 @@ impl<'a> ResolvedNode<'a>{
              node: schema.schema.as_ref()
          }
     }
-    pub fn from_map_types(prev_schema_map: ResolvedNode<'a>)->Option<ResolvedNode<'a>>{
-        match prev_schema_map.node {
+    pub fn from_map_types(self)->Option<ResolvedNode<'a>>{
+        match self.node {
             Schema::Map(map_schema) => {
                  Some(ResolvedNode{
-                     root: prev_schema_map.root,
+                     root: self.root,
                      node: &map_schema.types
                  })
             },
@@ -227,11 +227,11 @@ impl<'a> ResolvedNode<'a>{
         }
     }
     
-    pub fn from_array_items(prev_schema_array: ResolvedNode<'a>)->Option<ResolvedNode<'a>>{
-        match prev_schema_array.node {
+    pub fn from_array_items(self)->Option<ResolvedNode<'a>>{
+        match self.node {
             Schema::Array(array_schema) => {
                  Some(ResolvedNode{
-                     root: prev_schema_array.root,
+                     root: self.root,
                      node: &array_schema.items
                  })
             },
@@ -239,12 +239,12 @@ impl<'a> ResolvedNode<'a>{
         }
     }
     
-    pub fn from_record_fields(prev_schema_record: ResolvedNode<'a>)->Option<Vec<ResolvedNode<'a>>>{
-        match prev_schema_record.node {
+    pub fn from_record_fields(self)->Option<Vec<ResolvedNode<'a>>>{
+        match self.node {
             Schema::Record(record_schema) => {
                  Some(record_schema.fields.iter().map(|field|{
                      ResolvedNode{
-                         root: prev_schema_record.root,
+                         root: self.root,
                          node: &field.schema
                      }
                  }).collect())
@@ -253,12 +253,12 @@ impl<'a> ResolvedNode<'a>{
         }
     }
     
-    pub fn from_union_variant(prev_schema_union: ResolvedNode<'a>)->Option<Vec<ResolvedNode<'a>>>{
-        match prev_schema_union.node {
+    pub fn from_union_variant(self)->Option<Vec<ResolvedNode<'a>>>{
+        match self.node {
             Schema::Union(union_schema) => {
                  Some(union_schema.schemas.iter().map(|variant|{
                      ResolvedNode{
-                         root: prev_schema_union.root,
+                         root: self.root,
                          node: variant
                      }
                  }).collect())
@@ -267,12 +267,12 @@ impl<'a> ResolvedNode<'a>{
         }
     }
     
-    pub fn from_ref(prev_schema_ref: ResolvedNode<'a>)->Option<ResolvedNode<'a>>{
-        match prev_schema_ref.node {
+    pub fn from_ref(self)->Option<ResolvedNode<'a>>{
+        match self.node {
             Schema::Ref{name} => {
                 Some(ResolvedNode{
-                    root: prev_schema_ref.root,
-                    node: prev_schema_ref.root.get_context_definitions().get(name)?
+                    root: self.root,
+                    node: self.root.get_context_definitions().get(name)?
                 })
             },
              _ => Option::None
