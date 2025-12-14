@@ -36,8 +36,8 @@ pub struct ResolvedSchema{
 }
 
 // convenience types
-type NameMap = HashMap<Arc<Name>, Arc<Schema>>;
-type NameSet = HashSet<Arc<Name>>;
+pub type NameMap = HashMap<Arc<Name>, Arc<Schema>>;
+pub type NameSet = HashSet<Arc<Name>>;
 
 impl ResolvedSchema{
     pub fn from_str(input: impl AsRef<str>) -> AvroResult<ResolvedSchema>{
