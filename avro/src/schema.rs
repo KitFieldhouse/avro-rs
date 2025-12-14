@@ -2621,8 +2621,8 @@ mod tests {
 
         let schema_str_c = r#"["A", "B"]"#;
 
-        let (schema_c, schemata) =
-            Schema::parse_str_with_list(schema_str_c, [schema_str_a, schema_str_b])?;
+        let [schema_a, schema_b, schema_c]=
+            ResolvedSchema::from_strings_array([schema_str_a, schema_str_b, schema_str_c], Vec::<String>::new())?;
 
         let schema_a_expected = Schema::Record(RecordSchema {
             name: Name::new("A")?.into(),
@@ -2669,9 +2669,9 @@ mod tests {
             },
         ])?);
 
-        assert_eq!(schema_c, schema_c_expected);
-        assert_eq!(schemata[0], schema_a_expected);
-        assert_eq!(schemata[1], schema_b_expected);
+        assert_eq!(schema_a.schema.as_ref(), &schema_a_expected);
+        assert_eq!(schema_b.schema.as_ref(), &schema_b_expected);
+        assert_eq!(schema_c.schema.as_ref(), &schema_c_expected);
 
         Ok(())
     }
@@ -2697,7 +2697,7 @@ mod tests {
 
         let schema_str_c = r#"["A", "A"]"#;
 
-        match Schema::parse_str_with_list(schema_str_c, [schema_str_a1, schema_str_a2]) {
+        match ResolvedSchema::from_strings_array([schema_str_c], [schema_str_a1, schema_str_a2]) {
             Ok(_) => unreachable!("Expected an error that the name is already defined"),
             Err(e) => assert_eq!(
                 e.to_string(),
@@ -2728,7 +2728,7 @@ mod tests {
 
         let schema_str_c = r#"["A", "A"]"#;
 
-        match Schema::parse_str_with_list(schema_str_c, [schema_str_a, schema_str_b]) {
+        match ResolvedSchema::from_strings_array([schema_str_c], [schema_str_a, schema_str_b]) {
             Ok(_) => unreachable!("Expected an error that schema_str_b is missing a name field"),
             Err(e) => assert_eq!(e.to_string(), "No `name` field"),
         }
@@ -4317,7 +4317,7 @@ mod tests {
           ]
         }
         "#;
-        let rs = ResolvedSchema::parse_str(schema)?;
+        let rs = ResolvedSchema::from_str(schema)?;
         assert_eq!(rs.get_context_definitions().len(), 2);
         for s in &["space.record_name", "space.in_map_record"] {
             assert!(rs.get_context_definitions().contains_key(&Name::new(s)?));
