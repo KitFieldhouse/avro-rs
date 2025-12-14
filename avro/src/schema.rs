@@ -89,12 +89,12 @@ impl SchemaWithSymbols{
         parser.parse_str(input)
     }
 
-    pub fn parse_array<const N: usize>(input: [impl AsRef<str>; N]) -> [AvroResult<SchemaWithSymbols>; N]{
-        let mut input = input.into_iter();
-        std::array::from_fn(|_| {
-            let parser = Parser::default();
-            parser.parse_str(input.next().unwrap().as_ref())
-        })
+    pub fn parse_array<const N: usize>(input: [impl AsRef<str>; N]) -> AvroResult<[SchemaWithSymbols; N]>{
+        let input = input.into_iter();
+        let mut parsed = Self::parse_list(input)?.into_iter();
+        Ok(std::array::from_fn(|_| {
+            parsed.next().unwrap()
+        }))
     }
 
     pub fn parse_list(input: impl IntoIterator<Item = impl AsRef<str>>) -> AvroResult<Vec<SchemaWithSymbols>> {
