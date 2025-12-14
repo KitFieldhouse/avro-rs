@@ -19,10 +19,10 @@
 
 use serde::Serialize;
 
-use crate::schema::{self, ArraySchema, DecimalSchema, EnumSchema, FixedSchema, MapSchema, Name, RecordField, RecordSchema, Schema, SchemaWithSymbols, UnionSchema};
+use crate::schema::{ArraySchema, DecimalSchema, EnumSchema, FixedSchema, MapSchema, Name, RecordField, RecordSchema, Schema, SchemaWithSymbols, UnionSchema};
 use crate::AvroResult;
 use crate::error::{Details,Error};
-use std::{collections::{HashMap, HashSet}, sync::Arc, iter::once, borrow::Borrow};
+use std::{collections::{HashMap, HashSet}, sync::Arc, iter::once};
 
 /// contians a schema with all of the schema
 /// definitions it needs to be completely resolved
@@ -40,6 +40,17 @@ type NameMap = HashMap<Arc<Name>, Arc<Schema>>;
 type NameSet = HashSet<Arc<Name>>;
 
 impl ResolvedSchema{
+    pub fn from_strings_array<const N : usize>(to_resolve: [impl AsRef<str>; N] , additional: impl IntoIterator<Item = impl AsRef<str>>) -> AvroResult<[ResolvedSchema; N]>{
+        Self::from_strings_array_with_resolver(to_resolve, additional, &mut DefaultResolver::new())
+    }
+
+    pub fn from_strings_array_with_resolver<const N : usize>(to_resolve:  [impl AsRef<str>; N] , additional: impl IntoIterator<Item = impl AsRef<str>> , resolver: &mut impl Resolver) -> AvroResult<[ResolvedSchema; N]>{
+        let to_resolve = SchemaWithSymbols::parse_array(to_resolve)?;
+        let additional = SchemaWithSymbols::parse_list(additional)?;
+        let resolved = Self::from_schemata_array_with_resolver(to_resolve, additional.into_iter(), resolver)?;
+        Ok(resolved)
+    }
+
     pub fn from_strings<T : AsRef<str>>(to_resolve: Vec<T> , additional: Vec<T>) -> AvroResult<Vec<ResolvedSchema>>{
         Self::from_strings_with_resolver(to_resolve, additional, &mut DefaultResolver::new())
     }
@@ -51,13 +62,9 @@ impl ResolvedSchema{
         Ok(resolved.drain(0..to_resolve_len).collect())
     }
 
-    pub fn parse_str(schema: impl AsRef<str>) -> AvroResult<ResolvedSchema>{
-        Self::parse_str_with_resolver(schema, &mut DefaultResolver::new())
-    }
 
-    pub fn parse_str_with_resolver(schema: impl AsRef<str>, resolver: &mut impl Resolver) -> AvroResult<ResolvedSchema>{
-        let schema = SchemaWithSymbols::parse_str(schema.as_ref())?;
-        Ok(Self::from_schemata_with_resolver(vec![schema],Vec::new(), resolver)?.pop().unwrap())
+    pub fn from_schemata_array<const N : usize>(to_resolve: [SchemaWithSymbols;N], schemata_with_symbols: impl IntoIterator<Item = SchemaWithSymbols>) -> AvroResult<[ResolvedSchema; N]>{
+        Self::from_schemata_array_with_resolver(to_resolve, schemata_with_symbols, &mut DefaultResolver::new())
     }
 
     pub fn from_schemata(to_resolve: impl IntoIterator<Item = SchemaWithSymbols>, schemata_with_symbols: impl IntoIterator<Item = SchemaWithSymbols>) -> AvroResult<Vec<ResolvedSchema>>{
@@ -70,6 +77,22 @@ impl ResolvedSchema{
     /// schemata are those in which we want the associated ResolvedSchema forms of the schema to be
     /// returned. The second vector are schemata that are used for schema resolution, but do not
     /// have their ResolvedSchema form returned.
+    pub fn from_schemata_array_with_resolver<const N : usize>(to_resolve: [SchemaWithSymbols; N], schemata_with_symbols: impl IntoIterator<Item = SchemaWithSymbols>, resolver: &mut impl Resolver) -> AvroResult<[ResolvedSchema; N]> {
+
+        let mut definined_names : NameMap = HashMap::new();
+
+        let mut cloned_to_resolve = to_resolve.clone().into_iter();
+        Self::add_schemata(&mut definined_names, to_resolve.into_iter().chain(schemata_with_symbols), resolver)?;
+
+        Ok(std::array::from_fn(|_|{
+            let with_symbol = cloned_to_resolve.next().unwrap();
+            ResolvedSchema{
+                schema: with_symbol.schema,
+                context_definitions: Self::copy_needed_definitions(&definined_names, with_symbol.referenced_names)
+            }
+        }))
+    }
+
     pub fn from_schemata_with_resolver(to_resolve: impl IntoIterator<Item = SchemaWithSymbols>, schemata_with_symbols: impl IntoIterator<Item = SchemaWithSymbols>, resolver: &mut impl Resolver) -> AvroResult<Vec<ResolvedSchema>> {
 
         let mut definined_names : NameMap = HashMap::new();
