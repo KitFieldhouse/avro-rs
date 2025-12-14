@@ -3880,7 +3880,7 @@ mod tests {
           ]
         }
         "#;
-        let rs = ResolvedSchema::parse_str(schema)?;
+        let rs = ResolvedSchema::from_str(schema)?;
         assert_eq!(rs.get_context_definitions().len(), 2);
         for s in &["space.record_name", "space.inner_record_name"] {
             assert!(rs.get_context_definitions().contains_key(&Name::new(s)?));
@@ -3920,7 +3920,7 @@ mod tests {
           ]
         }
         "#;
-        let rs = ResolvedSchema::parse_str(schema)?;
+        let rs = ResolvedSchema::from_str(schema)?;
         assert_eq!(rs.get_context_definitions().len(), 2);
         for s in &["space.record_name", "space.inner_record_name"] {
             assert!(rs.get_context_definitions().contains_key(&Name::new(s)?));
@@ -3955,7 +3955,7 @@ mod tests {
           ]
         }
         "#;
-        let rs = ResolvedSchema::parse_str(schema)?;
+        let rs = ResolvedSchema::from_str(schema)?;
         assert_eq!(rs.get_context_definitions().len(), 2);
         for s in &["space.record_name", "space.inner_enum_name"] {
             assert!(rs.get_context_definitions().contains_key(&Name::new(s)?));
@@ -3990,7 +3990,7 @@ mod tests {
           ]
         }
         "#;
-        let rs = ResolvedSchema::parse_str(schema)?;
+        let rs = ResolvedSchema::from_str(schema)?;
         assert_eq!(rs.get_context_definitions().len(), 2);
         for s in &["space.record_name", "space.inner_enum_name"] {
             assert!(rs.get_context_definitions().contains_key(&Name::new(s)?));
@@ -4025,7 +4025,7 @@ mod tests {
           ]
         }
         "#;
-        let rs = ResolvedSchema::parse_str(schema)?;
+        let rs = ResolvedSchema::from_str(schema)?;
         assert_eq!(rs.get_context_definitions().len(), 2);
         for s in &["space.record_name", "space.inner_fixed_name"] {
             assert!(rs.get_context_definitions().contains_key(&Name::new(s)?));
@@ -4060,7 +4060,7 @@ mod tests {
           ]
         }
         "#;
-        let rs = ResolvedSchema::parse_str(schema)?;
+        let rs = ResolvedSchema::from_str(schema)?;
         assert_eq!(rs.get_context_definitions().len(), 2);
         for s in &["space.record_name", "space.inner_fixed_name"] {
             assert!(rs.get_context_definitions().contains_key(&Name::new(s)?));
@@ -4101,7 +4101,7 @@ mod tests {
           ]
         }
         "#;
-        let rs = ResolvedSchema::parse_str(schema)?;
+        let rs = ResolvedSchema::from_str(schema)?;
         assert_eq!(rs.get_context_definitions().len(), 2);
         for s in &["space.record_name", "inner_space.inner_record_name"] {
             assert!(rs.get_context_definitions().contains_key(&Name::new(s)?));
@@ -4137,7 +4137,7 @@ mod tests {
           ]
         }
         "#;
-        let rs = ResolvedSchema::parse_str(schema)?;
+        let rs = ResolvedSchema::from_str(schema)?;
         assert_eq!(rs.get_context_definitions().len(), 2);
         for s in &["space.record_name", "inner_space.inner_enum_name"] {
             assert!(rs.get_context_definitions().contains_key(&Name::new(s)?));
@@ -4173,7 +4173,7 @@ mod tests {
           ]
         }
         "#;
-        let rs = ResolvedSchema::parse_str(schema)?;
+        let rs = ResolvedSchema::from_str(schema)?;
         assert_eq!(rs.get_context_definitions().len(), 2);
         for s in &["space.record_name", "inner_space.inner_fixed_name"] {
             assert!(rs.get_context_definitions().contains_key(&Name::new(s)?));
@@ -4225,7 +4225,7 @@ mod tests {
           ]
         }
         "#;
-        let rs = ResolvedSchema::parse_str(schema)?;
+        let rs = ResolvedSchema::from_str(schema)?;
         assert_eq!(rs.get_context_definitions().len(), 3);
         for s in &[
             "space.record_name",
@@ -4282,7 +4282,7 @@ mod tests {
           ]
         }
         "#;
-        let rs = ResolvedSchema::parse_str(schema)?;
+        let rs = ResolvedSchema::from_str(schema)?;
         assert_eq!(rs.get_context_definitions().len(), 3);
         for s in &[
             "space.record_name",
@@ -4340,7 +4340,7 @@ mod tests {
           ]
         }
         "#;
-        let rs = ResolvedSchema::parse_str(schema)?;
+        let rs = ResolvedSchema::from_str(schema)?;
         assert_eq!(rs.get_context_definitions().len(), 3);
         for s in &[
             "space.record_name",
@@ -4384,7 +4384,7 @@ mod tests {
           ]
         }
         "#;
-        let rs = ResolvedSchema::parse_str(schema)?;
+        let rs = ResolvedSchema::from_str(schema)?;
         assert_eq!(rs.get_context_definitions().len(), 2);
         for s in &["space.record_name", "space.in_array_record"] {
             assert!(rs.get_context_definitions().contains_key(&Name::new(s)?));
