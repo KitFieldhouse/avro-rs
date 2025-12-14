@@ -1056,17 +1056,6 @@ impl Schema {
         parsing_canonical_form(&json, &mut defined_names)
     }
 
-    /// Returns the [Parsing Canonical Form] of `self` that is self contained (not dependent on
-    /// any definitions in `schemata`)
-    ///
-    /// [Parsing Canonical Form]:
-    /// https://avro.apache.org/docs/current/specification/#parsing-canonical-form-for-schemas
-    pub fn independent_canonical_form(&self, schemata: &[Schema]) -> Result<String, Error> {
-        let mut this = self.clone();
-        this.denormalize(schemata)?;
-        Ok(this.canonical_form())
-    }
-
     /// Generate [fingerprint] of Schema's [Parsing Canonical Form].
     ///
     /// [Parsing Canonical Form]:
@@ -1256,40 +1245,6 @@ impl Schema {
         })
     }
 
-    fn denormalize(&mut self, schemata: &[Schema]) -> AvroResult<()> {
-        match self {
-            Schema::Ref { name } => {
-                let replacement_schema = schemata
-                    .iter()
-                    .find(|s| s.name().map(|n| *n == *name).unwrap_or(false));
-                if let Some(schema) = replacement_schema {
-                    let mut denorm = schema.clone();
-                    denorm.denormalize(schemata)?;
-                    *self = denorm;
-                } else {
-                    return Err(Details::SchemaResolutionError(name.as_ref().clone()).into());
-                }
-            }
-            Schema::Record(record_schema) => {
-                for field in &mut record_schema.fields {
-                    field.schema.denormalize(schemata)?;
-                }
-            }
-            Schema::Array(array_schema) => {
-                array_schema.items.denormalize(schemata)?;
-            }
-            Schema::Map(map_schema) => {
-                map_schema.types.denormalize(schemata)?;
-            }
-            Schema::Union(union_schema) => {
-                for schema in &mut union_schema.schemas {
-                    schema.denormalize(schemata)?;
-                }
-            }
-            _ => (),
-        }
-        Ok(())
-    }
 }
 
 impl Parser {
