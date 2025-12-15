@@ -199,21 +199,25 @@ impl ResolvedSchema{
 }
 
 pub struct ResolvedArray<'a>{
+    schema: &'a Schema,
     array_schema: &'a ArraySchema,
     root: &'a ResolvedSchema
 }
 
 pub struct ResolvedMap<'a>{
+    schema: &'a Schema,
     map_schema: &'a MapSchema,
     root: &'a ResolvedSchema
 }
 
 pub struct ResolvedUnion<'a>{
+    schema: &'a Schema,
     union_schema: &'a UnionSchema,
     root: &'a ResolvedSchema
 }
 
 pub struct ResolvedRecord<'a>{
+    schema: &'a Schema,
     record_schema: &'a RecordSchema,
     root: &'a ResolvedSchema
 }
@@ -242,12 +246,22 @@ impl<'a> ResolvedNode<'a> {
 
    fn from_schema(schema: &'a Schema, root: &'a ResolvedSchema) -> ResolvedNode<'a>{
        match schema {
-        Schema::Map(map_schema) => ResolvedNode::Map(ResolvedMap{map_schema, root}),
-        Schema::Union(union_schema) => ResolvedNode::Union(ResolvedUnion{union_schema, root}),
-        Schema::Array(array_schema) => ResolvedNode::Array(ResolvedArray{array_schema, root}),
-        Schema::Record(record_schema) => ResolvedNode::Record(ResolvedRecord{record_schema, root}),
+        Schema::Map(map_schema) => ResolvedNode::Map(ResolvedMap{schema, map_schema, root}),
+        Schema::Union(union_schema) => ResolvedNode::Union(ResolvedUnion{schema, union_schema, root}),
+        Schema::Array(array_schema) => ResolvedNode::Array(ResolvedArray{schema, array_schema, root}),
+        Schema::Record(record_schema) => ResolvedNode::Record(ResolvedRecord{schema, record_schema, root}),
         Schema::Ref{name} => Self::from_schema(root.get_context_definitions().get(name).unwrap(), root),
         _ => ResolvedNode::Leaf(schema)
+       }
+   }
+
+   pub fn get_schema(&self)-> &Schema{
+       match *self {
+           Self::Leaf(schema) => schema,
+           Self::Array(ref resolved_array) => resolved_array.schema,
+           Self::Union(ref resolved_union) => resolved_union.schema,
+           Self::Record(ref resolved_record) => resolved_record.schema,
+           Self::Map(ref resolved_map) => resolved_map.schema
        }
    }
 }
