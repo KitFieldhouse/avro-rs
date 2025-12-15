@@ -30,6 +30,7 @@ use std::{collections::{HashMap, HashSet}, sync::Arc, iter::once};
 /// type in the schema has exactly one unique definition
 /// and every named reference in the schema can be uniquely
 /// resolved to one of these definitions.
+#[derive(Debug)]
 pub struct ResolvedSchema{
     pub schema: Arc<Schema>,
     context_definitions: HashMap<Arc<Name>,Arc<Schema>>
@@ -200,6 +201,7 @@ impl ResolvedSchema{
 /// Represents a node inside a resolved schema.
 /// This is can be used when traversing down a resolved schema tree as it couples
 /// the root definintion information with a reference into the schema.
+#[derive(Debug, Clone, Copy)]
 pub struct ResolvedNode<'a>{
     root: &'a ResolvedSchema,
     node: &'a Schema
