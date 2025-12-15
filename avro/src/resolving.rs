@@ -198,87 +198,94 @@ impl ResolvedSchema{
     }
 }
 
+pub struct ResolvedArray<'a>{
+    array_schema: &'a ArraySchema,
+    root: &'a ResolvedSchema
+}
+
+pub struct ResolvedMap<'a>{
+    map_schema: &'a MapSchema,
+    root: &'a ResolvedSchema
+}
+
+pub struct ResolvedUnion<'a>{
+    union_schema: &'a UnionSchema,
+    root: &'a ResolvedSchema
+}
+
+pub struct ResolvedRecord<'a>{
+    record_schema: &'a RecordSchema,
+    root: &'a ResolvedSchema
+}
+
+pub struct ResolvedRecordField<'a>{
+    field: &'a RecordField,
+    root: &'a ResolvedSchema
+}
+
+pub enum ResolvedNode<'a>{
+    Leaf(&'a Schema),
+    Array(ResolvedArray<'a>),
+    Map(ResolvedMap<'a>),
+    Union(ResolvedUnion<'a>),
+    Record(ResolvedRecord<'a>),
+}
+
 /// Represents a node inside a resolved schema.
 /// This is can be used when traversing down a resolved schema tree as it couples
 /// the root definintion information with a reference into the schema.
-#[derive(Debug, Clone, Copy)]
-pub struct ResolvedNode<'a>{
-    root: &'a ResolvedSchema,
-    node: &'a Schema
+impl<'a> ResolvedNode<'a> {
+   pub fn new(root: &'a ResolvedSchema)->ResolvedNode<'a>{
+       let schema = root.schema.as_ref();
+       Self::from_schema(schema, root)
+   }
+
+   fn from_schema(schema: &'a Schema, root: &'a ResolvedSchema) -> ResolvedNode<'a>{
+       match schema {
+        Schema::Map(map_schema) => ResolvedNode::Map(ResolvedMap{map_schema, root}),
+        Schema::Union(union_schema) => ResolvedNode::Union(ResolvedUnion{union_schema, root}),
+        Schema::Array(array_schema) => ResolvedNode::Array(ResolvedArray{array_schema, root}),
+        Schema::Record(record_schema) => ResolvedNode::Record(ResolvedRecord{record_schema, root}),
+        Schema::Ref{name} => Self::from_schema(root.get_context_definitions().get(name).unwrap(), root),
+        _ => ResolvedNode::Leaf(schema)
+       }
+   }
 }
 
-impl<'a> ResolvedNode<'a>{
-    pub fn get_node(&self) -> &'a Schema {
-        self.node
+impl<'a> ResolvedMap<'a>{
+    fn resolve_types(&self)->ResolvedNode{
+       ResolvedNode::from_schema(&self.map_schema.types, self.root)
     }
-    pub fn new(schema: &'a ResolvedSchema)->ResolvedNode<'a>{
-         ResolvedNode{
-             root: schema,
-             node: schema.schema.as_ref()
-         }
+}
+
+impl<'a> ResolvedUnion<'a>{
+    fn resolve_schemas(&self)->Vec<ResolvedNode>{
+        self.union_schema.schemas.iter().map(|schema|{
+            ResolvedNode::from_schema(schema, self.root)
+        }).collect()
     }
-    pub fn from_map_types(self)->Option<ResolvedNode<'a>>{
-        match self.node {
-            Schema::Map(map_schema) => {
-                 Some(ResolvedNode{
-                     root: self.root,
-                     node: &map_schema.types
-                 })
-            },
-             _ => Option::None
-        }
+}
+
+impl<'a> ResolvedArray<'a>{
+    fn resolve_items(&self)->ResolvedNode{
+        ResolvedNode::from_schema(&self.array_schema.items, self.root)
     }
-    
-    pub fn from_array_items(self)->Option<ResolvedNode<'a>>{
-        match self.node {
-            Schema::Array(array_schema) => {
-                 Some(ResolvedNode{
-                     root: self.root,
-                     node: &array_schema.items
-                 })
-            },
-             _ => Option::None
-        }
+}
+
+impl<'a> ResolvedRecord<'a>{
+    fn resolve_fields(&self)->Vec<ResolvedRecordField>{
+        self.record_schema.fields.iter().map(|field|{
+            ResolvedRecordField{
+                field,
+                root: self.root
+            }
+        }).collect()
     }
-    
-    pub fn from_record_fields(self)->Option<Vec<ResolvedNode<'a>>>{
-        match self.node {
-            Schema::Record(record_schema) => {
-                 Some(record_schema.fields.iter().map(|field|{
-                     ResolvedNode{
-                         root: self.root,
-                         node: &field.schema
-                     }
-                 }).collect())
-            },
-             _ => Option::None
-        }
-    }
-    
-    pub fn from_union_variant(self)->Option<Vec<ResolvedNode<'a>>>{
-        match self.node {
-            Schema::Union(union_schema) => {
-                 Some(union_schema.schemas.iter().map(|variant|{
-                     ResolvedNode{
-                         root: self.root,
-                         node: variant
-                     }
-                 }).collect())
-            },
-             _ => Option::None
-        }
-    }
-    
-    pub fn from_ref(self)->Option<ResolvedNode<'a>>{
-        match self.node {
-            Schema::Ref{name} => {
-                Some(ResolvedNode{
-                    root: self.root,
-                    node: self.root.get_context_definitions().get(name)?
-                })
-            },
-             _ => Option::None
-        }
+}
+
+impl<'a> ResolvedRecordField<'a>{
+    fn resolve_field_schema(&self)->ResolvedNode{
+        ResolvedNode::from_schema(&self.field.schema, self.root)
     }
 }
 
