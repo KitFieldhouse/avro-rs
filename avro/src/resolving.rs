@@ -19,7 +19,7 @@
 
 use serde::Serialize;
 
-use crate::schema::{self, ArraySchema, DecimalSchema, EnumSchema, FixedSchema, MapSchema, Name, RecordField, RecordSchema, Schema, SchemaWithSymbols, UnionSchema};
+use crate::schema::{self, ArraySchema, DecimalSchema, EnumSchema, FixedSchema, MapSchema, Name, RecordField, RecordSchema, Schema, SchemaWithSymbols, UnionSchema, LeafSchema};
 use crate::AvroResult;
 use crate::error::{Details,Error};
 use std::{collections::{HashMap, HashSet}, sync::Arc, iter::once};
@@ -228,7 +228,7 @@ pub struct ResolvedRecordField<'a>{
 }
 
 pub enum ResolvedNode<'a>{
-    Leaf(&'a Schema),
+    Leaf(LeafSchema<'a>),
     Array(ResolvedArray<'a>),
     Map(ResolvedMap<'a>),
     Union(ResolvedUnion<'a>),
@@ -251,13 +251,35 @@ impl<'a> ResolvedNode<'a> {
         Schema::Array(array_schema) => ResolvedNode::Array(ResolvedArray{schema, array_schema, root}),
         Schema::Record(record_schema) => ResolvedNode::Record(ResolvedRecord{schema, record_schema, root}),
         Schema::Ref{name} => Self::from_schema(root.get_context_definitions().get(name).unwrap(), root),
-        _ => ResolvedNode::Leaf(schema)
+        Schema::Null => ResolvedNode::Leaf(LeafSchema::Null),
+        Schema::Boolean => ResolvedNode::Leaf(LeafSchema::Boolean),
+        Schema::Int => ResolvedNode::Leaf(LeafSchema::Int),
+        Schema::Long => ResolvedNode::Leaf(LeafSchema::Long),
+        Schema::Float => ResolvedNode::Leaf(LeafSchema::Float),
+        Schema::Double => ResolvedNode::Leaf(LeafSchema::Double),
+        Schema::Bytes => ResolvedNode::Leaf(LeafSchema::Bytes),
+        Schema::String => ResolvedNode::Leaf(LeafSchema::String),
+        Schema::BigDecimal => ResolvedNode::Leaf(LeafSchema::BigDecimal),
+        Schema::Uuid => ResolvedNode::Leaf(LeafSchema::Uuid),
+        Schema::Date => ResolvedNode::Leaf(LeafSchema::Date),
+        Schema::TimeMillis => ResolvedNode::Leaf(LeafSchema::TimeMillis),
+        Schema::TimeMicros => ResolvedNode::Leaf(LeafSchema::TimeMicros),
+        Schema::TimestampMillis => ResolvedNode::Leaf(LeafSchema::TimestampMillis),
+        Schema::TimestampMicros => ResolvedNode::Leaf(LeafSchema::TimestampMicros),
+        Schema::TimestampNanos => ResolvedNode::Leaf(LeafSchema::TimestampNanos),
+        Schema::LocalTimestampMillis => ResolvedNode::Leaf(LeafSchema::LocalTimestampMillis),
+        Schema::LocalTimestampMicros => ResolvedNode::Leaf(LeafSchema::LocalTimestampMicros),
+        Schema::LocalTimestampNanos => ResolvedNode::Leaf(LeafSchema::LocalTimestampNanos),
+        Schema::Duration => ResolvedNode::Leaf(LeafSchema::Duration),
+        Schema::Enum(enum_schema) => ResolvedNode::Leaf(LeafSchema::Enum(schema, enum_schema)),
+        Schema::Fixed(fixed_schema) => ResolvedNode::Leaf(LeafSchema::Fixed(schema, fixed_schema)),
+        Schema::Decimal(decimal_schema) => ResolvedNode::Leaf(LeafSchema::Decimal(schema, decimal_schema))
        }
    }
 
    pub fn get_schema(&self)-> &Schema{
        match *self {
-           Self::Leaf(schema) => schema,
+           Self::Leaf(ref schema) => schema.into(),
            Self::Array(ref resolved_array) => resolved_array.schema,
            Self::Union(ref resolved_union) => resolved_union.schema,
            Self::Record(ref resolved_record) => resolved_record.schema,
