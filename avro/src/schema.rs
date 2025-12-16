@@ -27,7 +27,7 @@ use crate::{
     },
     resolving::ResolvedSchema
 };
-use digest::Digest;
+use digest::{typenum::Le, Digest};
 use log::{debug, error, warn};
 use serde::{
     Deserialize, Serialize, Serializer,
@@ -178,6 +178,96 @@ pub enum Schema {
     Duration(FixedSchema),
     /// A reference to another schema.
     Ref { name: Arc<Name> },
+}
+
+pub enum LeafSchema<'a>{
+    Null,
+    Boolean,
+    Int,
+    Long,
+    Float,
+    Double,
+    Bytes,
+    String,
+    BigDecimal,
+    Uuid,
+    Date,
+    TimeMillis,
+    TimeMicros,
+    TimestampMillis,
+    TimestampMicros,
+    TimestampNanos,
+    LocalTimestampMillis,
+    LocalTimestampMicros,
+    LocalTimestampNanos,
+    Duration,
+    Enum(&'a Schema, &'a EnumSchema),
+    Fixed(&'a Schema, &'a FixedSchema),
+    Decimal(&'a Schema, &'a DecimalSchema),
+}
+
+impl<'a> TryFrom<&'a Schema> for LeafSchema<'a>{
+    type Error = ();
+    fn try_from(value: &'a Schema) -> Result<Self, ()> {
+        match value {
+            Schema::Null => Ok(LeafSchema::Null),
+            Schema::Boolean => Ok(LeafSchema::Boolean),
+            Schema::Int => Ok(LeafSchema::Int),
+            Schema::Long => Ok(LeafSchema::Long),
+            Schema::Float => Ok(LeafSchema::Float),
+            Schema::Double => Ok(LeafSchema::Double),
+            Schema::Bytes => Ok(LeafSchema::Bytes),
+            Schema::String => Ok(LeafSchema::String),
+            Schema::BigDecimal => Ok(LeafSchema::BigDecimal),
+            Schema::Uuid => Ok(LeafSchema::Uuid),
+            Schema::Date => Ok(LeafSchema::Date),
+            Schema::TimeMillis => Ok(LeafSchema::TimeMillis),
+            Schema::TimeMicros => Ok(LeafSchema::TimeMicros),
+            Schema::TimestampMillis => Ok(LeafSchema::TimestampMillis),
+            Schema::TimestampMicros => Ok(LeafSchema::TimestampMicros),
+            Schema::TimestampNanos => Ok(LeafSchema::TimestampNanos),
+            Schema::LocalTimestampMillis => Ok(LeafSchema::LocalTimestampMillis),
+            Schema::LocalTimestampMicros => Ok(LeafSchema::LocalTimestampMicros),
+            Schema::LocalTimestampNanos => Ok(LeafSchema::LocalTimestampNanos),
+            Schema::Duration => Ok(LeafSchema::Duration),
+            Schema::Enum(enum_schema) => Ok(LeafSchema::Enum(value, enum_schema)),
+            Schema::Fixed(fixed_schema) => Ok(LeafSchema::Fixed(value, fixed_schema)),
+            Schema::Decimal(decimal_schema) => Ok(LeafSchema::Decimal(value, decimal_schema)),
+            _ => {
+                Err(())
+            }
+        }
+    }
+}
+
+impl<'a> From<&LeafSchema<'a>> for &'a Schema{
+    fn from(value: &LeafSchema<'a>) -> &'a Schema {
+        match value {
+            LeafSchema::Null => &Schema::Null,
+           LeafSchema::Boolean => &Schema::Boolean,
+           LeafSchema::Int => &Schema::Int,
+           LeafSchema::Long => &Schema::Long,
+           LeafSchema::Float => &Schema::Float,
+           LeafSchema::Double => &Schema::Double,
+           LeafSchema::Bytes => &Schema::Bytes,
+           LeafSchema::String => &Schema::String,
+           LeafSchema::BigDecimal => &Schema::BigDecimal,
+           LeafSchema::Uuid => &Schema::Uuid,
+           LeafSchema::Date => &Schema::Date,
+           LeafSchema::TimeMillis => &Schema::TimeMillis,
+           LeafSchema::TimeMicros => &Schema::TimeMicros,
+           LeafSchema::TimestampMillis => &Schema::TimestampMillis,
+           LeafSchema::TimestampMicros => &Schema::TimestampMicros,
+           LeafSchema::TimestampNanos => &Schema::TimestampNanos,
+           LeafSchema::LocalTimestampMillis => &Schema::LocalTimestampMillis,
+           LeafSchema::LocalTimestampMicros => &Schema::LocalTimestampMicros,
+           LeafSchema::LocalTimestampNanos => &Schema::LocalTimestampNanos,
+           LeafSchema::Duration => &Schema::Duration,
+           LeafSchema::Enum(schema, _enum_schema) => schema,
+           LeafSchema::Fixed(schema, _fixed_schema) => schema,
+           LeafSchema::Decimal(schema, _decimal_schema) => schema,
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq)]
