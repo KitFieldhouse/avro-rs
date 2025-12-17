@@ -302,6 +302,10 @@ impl<'a> ResolvedMap<'a>{
     pub fn get_map_schema(&self) -> &'a MapSchema{
         self.map_schema
     }
+
+    pub fn get_schema(&self) -> &'a Schema{
+        self.schema
+    }
 }
 
 impl<'a> ResolvedUnion<'a>{
@@ -314,6 +318,10 @@ impl<'a> ResolvedUnion<'a>{
     pub fn get_union_schema(&self) -> &'a UnionSchema{
         self.union_schema
     }
+
+    pub fn get_schema(&self) -> &'a Schema{
+        self.schema
+    }
 }
 
 impl<'a> ResolvedArray<'a>{
@@ -323,6 +331,10 @@ impl<'a> ResolvedArray<'a>{
 
     pub fn get_array_schema(&self) -> &'a ArraySchema{
         self.array_schema
+    }
+
+    pub fn get_schema(&self) -> &'a Schema{
+        self.schema
     }
 }
 
@@ -338,6 +350,10 @@ impl<'a> ResolvedRecord<'a>{
 
     pub fn get_record_schema(&self) -> &'a RecordSchema{
         self.record_schema
+    }
+
+    pub fn get_schema(&self) -> &'a Schema{
+        self.schema
     }
 }
 
