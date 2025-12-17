@@ -1029,6 +1029,10 @@ impl UnionSchema {
        self.variant_index.get(schema_kind).copied()
     }
 
+    pub fn get_variant_with_type(&self, schema_kind: &SchemaKind) -> Option<&Schema>{
+       Some(&self.schemas[*self.variant_index.get(schema_kind)?])
+    }
+
     /// Returns true if the any of the variants of this `UnionSchema` is `Null`.
     pub fn is_nullable(&self) -> bool {
         self.schemas.iter().any(|x| matches!(x, Schema::Null))
