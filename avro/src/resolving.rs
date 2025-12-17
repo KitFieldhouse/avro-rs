@@ -19,7 +19,7 @@
 
 use serde::Serialize;
 
-use crate::schema::{self, ArraySchema, DecimalSchema, EnumSchema, FixedSchema, MapSchema, Name, RecordField, RecordSchema, Schema, SchemaWithSymbols, UnionSchema, LeafSchema};
+use crate::schema::{self, derive, ArraySchema, DecimalSchema, EnumSchema, FixedSchema, LeafSchema, MapSchema, Name, RecordField, RecordSchema, Schema, SchemaWithSymbols, UnionSchema};
 use crate::AvroResult;
 use crate::error::{Details,Error};
 use std::{collections::{HashMap, HashSet}, sync::Arc, iter::once};
@@ -198,35 +198,41 @@ impl ResolvedSchema{
     }
 }
 
+#[derive(Clone)]
 pub struct ResolvedArray<'a>{
     schema: &'a Schema,
     array_schema: &'a ArraySchema,
     root: &'a ResolvedSchema
 }
 
+#[derive(Clone)]
 pub struct ResolvedMap<'a>{
     schema: &'a Schema,
     map_schema: &'a MapSchema,
     root: &'a ResolvedSchema
 }
 
+#[derive(Clone)]
 pub struct ResolvedUnion<'a>{
     schema: &'a Schema,
     union_schema: &'a UnionSchema,
     root: &'a ResolvedSchema
 }
 
+#[derive(Clone)]
 pub struct ResolvedRecord<'a>{
     schema: &'a Schema,
     record_schema: &'a RecordSchema,
     root: &'a ResolvedSchema
 }
 
+#[derive(Clone)]
 pub struct ResolvedRecordField<'a>{
     field: &'a RecordField,
     root: &'a ResolvedSchema
 }
 
+#[derive(Clone)]
 pub enum ResolvedNode<'a>{
     Leaf(LeafSchema<'a>),
     Array(ResolvedArray<'a>),

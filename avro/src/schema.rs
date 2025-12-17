@@ -180,6 +180,7 @@ pub enum Schema {
     Ref { name: Arc<Name> },
 }
 
+#[derive(Clone)]
 pub enum LeafSchema<'a>{
     Null,
     Boolean,
