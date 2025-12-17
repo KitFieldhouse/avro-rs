@@ -289,27 +289,39 @@ impl<'a> ResolvedNode<'a> {
 }
 
 impl<'a> ResolvedMap<'a>{
-    fn resolve_types(&self)->ResolvedNode{
+    pub fn resolve_types(&self)->ResolvedNode{
        ResolvedNode::from_schema(&self.map_schema.types, self.root)
+    }
+
+    pub fn get_map_schema(&self) -> &'a MapSchema{
+        self.map_schema
     }
 }
 
 impl<'a> ResolvedUnion<'a>{
-    fn resolve_schemas(&self)->Vec<ResolvedNode>{
+    pub fn resolve_schemas(&self)->Vec<ResolvedNode>{
         self.union_schema.schemas.iter().map(|schema|{
             ResolvedNode::from_schema(schema, self.root)
         }).collect()
     }
+
+    pub fn get_union_schema(&self) -> &'a UnionSchema{
+        self.union_schema
+    }
 }
 
 impl<'a> ResolvedArray<'a>{
-    fn resolve_items(&self)->ResolvedNode{
+    pub fn resolve_items(&self)->ResolvedNode{
         ResolvedNode::from_schema(&self.array_schema.items, self.root)
+    }
+
+    pub fn get_array_schema(&self) -> &'a ArraySchema{
+        self.array_schema
     }
 }
 
 impl<'a> ResolvedRecord<'a>{
-    fn resolve_fields(&self)->Vec<ResolvedRecordField>{
+    pub fn resolve_fields(&self)->Vec<ResolvedRecordField>{
         self.record_schema.fields.iter().map(|field|{
             ResolvedRecordField{
                 field,
@@ -317,11 +329,19 @@ impl<'a> ResolvedRecord<'a>{
             }
         }).collect()
     }
+
+    pub fn get_record_schema(&self) -> &'a RecordSchema{
+        self.record_schema
+    }
 }
 
 impl<'a> ResolvedRecordField<'a>{
-    fn resolve_field_schema(&self)->ResolvedNode{
+    pub fn resolve_field_schema(&self)->ResolvedNode{
         ResolvedNode::from_schema(&self.field.schema, self.root)
+    }
+
+    pub fn get_record_field(&self) -> &'a RecordField{
+        self.field
     }
 }
 
