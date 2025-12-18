@@ -358,7 +358,7 @@ impl<'a> ResolvedRecord<'a>{
 }
 
 impl<'a> ResolvedRecordField<'a>{
-    pub fn resolve_field_schema(&self)->ResolvedNode{
+    pub fn resolve_field(&self)->ResolvedNode{
         ResolvedNode::from_schema(&self.field.schema, self.root)
     }
 
