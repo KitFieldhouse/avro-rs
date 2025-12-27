@@ -18,18 +18,13 @@
 //! Logic handling the intermediate representation of Avro values.
 use crate::schema::{InnerDecimalSchema, UuidSchema};
 use crate::{
-    AvroResult, Error,
-    bigdecimal::{deserialize_big_decimal, serialize_big_decimal},
-    decimal::Decimal,
-    duration::Duration,
-    error::Details,
-    schema::{
-        DecimalSchema, EnumSchema, FixedSchema, Name, Namespace, Precision, RecordField,
-        RecordSchema, ResolvedSchema, Scale, Schema, SchemaKind, UnionSchema,
-    },
+    bigdecimal::{deserialize_big_decimal, serialize_big_decimal}, decimal::Decimal, duration::Duration, error::Details, resolving::{ResolvedArray, ResolvedMap, ResolvedNode, ResolvedRecord, ResolvedSchema, ResolvedUnion}, schema::{
+        DecimalSchema, EnumSchema, FixedSchema, ResolvedNode, Name, Namespace, Precision, RecordField, RecordSchema, ResolvedSchema, Scale, Schema, SchemaKind, UnionSchema
+    }, AvroResult, Error
 };
 use bigdecimal::BigDecimal;
 use log::{debug, error};
+use rand::seq::index;
 use serde_json::{Number, Value as JsonValue};
 use std::{
     borrow::Borrow,
@@ -644,42 +639,20 @@ impl Value {
         }
     }
 
-    /// Attempt to perform schema resolution on the value, with the given
-    /// [Schema](../schema/enum.Schema.html).
-    ///
-    /// See [Schema Resolution](https://avro.apache.org/docs/current/specification/#schema-resolution)
-    /// in the Avro specification for the full set of rules of schema
-    /// resolution.
-    pub fn resolve(self, schema: &Schema) -> AvroResult<Self> {
-        self.resolve_schemata(schema, Vec::with_capacity(0))
+    /// Resolve this value (self) with provided resolved schema.
+    /// This resolution techinically follows a superset of the the schema resolution
+    /// rules defined by the specification. TODO: documentation
+    pub fn resolve_schemata(self, resolved: ResolvedSchema) -> AvroResult<Self> {
+        self.resolve_internal(ResolvedNode::new(&resolved))
     }
 
-    /// Attempt to perform schema resolution on the value, with the given
-    /// [Schema](../schema/enum.Schema.html) and set of schemas to use for Refs resolution.
-    ///
-    /// See [Schema Resolution](https://avro.apache.org/docs/current/specification/#schema-resolution)
-    /// in the Avro specification for the full set of rules of schema
-    /// resolution.
-    pub fn resolve_schemata(self, schema: &Schema, schemata: Vec<&Schema>) -> AvroResult<Self> {
-        let enclosing_namespace = schema.namespace();
-        let rs = if schemata.is_empty() {
-            ResolvedSchema::try_from(schema)?
-        } else {
-            ResolvedSchema::try_from(schemata)?
-        };
-        self.resolve_internal(schema, rs.get_names(), &enclosing_namespace, &None)
-    }
-
-    pub(crate) fn resolve_internal<S: Borrow<Schema> + Debug>(
+    pub(crate) fn resolve_internal(
         mut self,
-        schema: &Schema,
-        names: &HashMap<Name, S>,
-        enclosing_namespace: &Namespace,
-        field_default: &Option<JsonValue>,
+        node: ResolvedNode
     ) -> AvroResult<Self> {
         // Check if this schema is a union, and if the reader schema is not.
         if SchemaKind::from(&self) == SchemaKind::Union
-            && SchemaKind::from(schema) != SchemaKind::Union
+            && SchemaKind::from(node.get_schema()) != SchemaKind::Union
         {
             // Pull out the Union, and attempt to resolve against it.
             let v = match self {
@@ -688,55 +661,48 @@ impl Value {
             };
             self = v;
         }
-        match schema {
-            Schema::Ref { name } => {
-                let name = name.fully_qualified_name(enclosing_namespace);
-
-                if let Some(resolved) = names.get(&name) {
-                    debug!("Resolved {name:?}");
-                    self.resolve_internal(resolved.borrow(), names, &name.namespace, field_default)
-                } else {
-                    error!("Failed to resolve schema {name:?}");
-                    Err(Details::SchemaResolutionError(name.clone()).into())
-                }
-            }
-            Schema::Null => self.resolve_null(),
-            Schema::Boolean => self.resolve_boolean(),
-            Schema::Int => self.resolve_int(),
-            Schema::Long => self.resolve_long(),
-            Schema::Float => self.resolve_float(),
-            Schema::Double => self.resolve_double(),
-            Schema::Bytes => self.resolve_bytes(),
-            Schema::String => self.resolve_string(),
-            Schema::Fixed(FixedSchema { size, .. }) => self.resolve_fixed(*size),
-            Schema::Union(inner) => {
-                self.resolve_union(inner, names, enclosing_namespace, field_default)
-            }
-            Schema::Enum(EnumSchema {
-                symbols, default, ..
-            }) => self.resolve_enum(symbols, default, field_default),
-            Schema::Array(inner) => self.resolve_array(&inner.items, names, enclosing_namespace),
-            Schema::Map(inner) => self.resolve_map(&inner.types, names, enclosing_namespace),
-            Schema::Record(RecordSchema { fields, .. }) => {
-                self.resolve_record(fields, names, enclosing_namespace)
-            }
-            Schema::Decimal(DecimalSchema {
+        match node {
+            ResolvedNode::Null(_) => self.resolve_null(),
+            ResolvedNode::Boolean(_) => self.resolve_boolean(),
+            ResolvedNode::Int(_) => self.resolve_int(),
+            ResolvedNode::Long(_) => self.resolve_long(),
+            ResolvedNode::Float(_) => self.resolve_float(),
+            ResolvedNode::Double(_) => self.resolve_double(),
+            ResolvedNode::Bytes(_) => self.resolve_bytes(),
+            ResolvedNode::String(_) => self.resolve_string(),
+            ResolvedNode::Fixed(_, FixedSchema { size, .. }) => self.resolve_fixed(*size),
+            ResolvedNode::Enum(_, EnumSchema {
+                symbols,
+                default,
+                ..
+            }) => self.resolve_enum(symbols, default),
+            ResolvedNode::BigDecimal(_) => self.resolve_bigdecimal(),
+            ResolvedNode::Date(_) => self.resolve_date(),
+            ResolvedNode::TimeMillis(_) => self.resolve_time_millis(),
+            ResolvedNode::TimeMicros(_) => self.resolve_time_micros(),
+            ResolvedNode::TimestampMillis(_) => self.resolve_timestamp_millis(),
+            ResolvedNode::TimestampMicros(_) => self.resolve_timestamp_micros(),
+            ResolvedNode::TimestampNanos(_) => self.resolve_timestamp_nanos(),
+            ResolvedNode::LocalTimestampMillis(_) => self.resolve_local_timestamp_millis(),
+            ResolvedNode::LocalTimestampMicros(_) => self.resolve_local_timestamp_micros(),
+            ResolvedNode::LocalTimestampNanos(_) => self.resolve_local_timestamp_nanos(),
+            ResolvedNode::Duration(_) => self.resolve_duration(),
+            ResolvedNode::Uuid(_) => self.resolve_uuid(),
+            ResolvedNode::Decimal(_, DecimalSchema {
                 scale,
                 precision,
                 inner,
-            }) => self.resolve_decimal(*precision, *scale, inner),
-            Schema::BigDecimal => self.resolve_bigdecimal(),
-            Schema::Date => self.resolve_date(),
-            Schema::TimeMillis => self.resolve_time_millis(),
-            Schema::TimeMicros => self.resolve_time_micros(),
-            Schema::TimestampMillis => self.resolve_timestamp_millis(),
-            Schema::TimestampMicros => self.resolve_timestamp_micros(),
-            Schema::TimestampNanos => self.resolve_timestamp_nanos(),
-            Schema::LocalTimestampMillis => self.resolve_local_timestamp_millis(),
-            Schema::LocalTimestampMicros => self.resolve_local_timestamp_micros(),
-            Schema::LocalTimestampNanos => self.resolve_local_timestamp_nanos(),
-            Schema::Duration(_) => self.resolve_duration(),
-            Schema::Uuid(inner) => self.resolve_uuid(inner),
+            }) => self.resolve_decimal(precision, scale, inner),
+            ResolvedNode::Union(resolved_union) => {
+                self.resolve_union(resolved_union)
+            }
+            ResolvedNode::Array(resolved_array) => {
+                self.resolve_array(resolved_array)
+            }
+            ResolvedNode::Map(resolved_map) => self.resolve_map(resolved_map),
+            ResolvedNode::Record(resolved_record) => {
+                self.resolve_record(resolved_record)
+            }
         }
     }
 
@@ -791,7 +757,7 @@ impl Value {
         inner: &InnerDecimalSchema,
     ) -> Result<Self, Error> {
         if scale > precision {
-            return Err(Details::GetScaleAndPrecision { scale, precision }.into());
+            return Err(Details::GetScaleAndPrecision { scale, precision}.into());
         }
         match inner {
             &InnerDecimalSchema::Fixed(FixedSchema { size, .. }) => {
@@ -806,7 +772,7 @@ impl Value {
                 let num_bytes = num.len();
                 if max_prec_for_len(num_bytes)? < precision {
                     Err(Details::ComparePrecisionAndSize {
-                        precision,
+                        precision: precision,
                         num_bytes,
                     }
                     .into())
@@ -818,7 +784,7 @@ impl Value {
             Value::Fixed(_, bytes) | Value::Bytes(bytes) => {
                 if max_prec_for_len(bytes.len())? < precision {
                     Err(Details::ComparePrecisionAndSize {
-                        precision,
+                        precision: precision,
                         num_bytes: bytes.len(),
                     }
                     .into())
@@ -1025,8 +991,7 @@ impl Value {
     pub(crate) fn resolve_enum(
         self,
         symbols: &[String],
-        enum_default: &Option<String>,
-        _field_default: &Option<JsonValue>,
+        enum_default: &Option<String>
     ) -> Result<Self, Error> {
         let validate_symbol = |symbol: String, symbols: &[String]| {
             if let Some(index) = symbols.iter().position(|item| item == &symbol) {
@@ -1060,12 +1025,9 @@ impl Value {
         }
     }
 
-    fn resolve_union<S: Borrow<Schema> + Debug>(
+    fn resolve_union(
         self,
-        schema: &UnionSchema,
-        names: &HashMap<Name, S>,
-        enclosing_namespace: &Namespace,
-        field_default: &Option<JsonValue>,
+        resolved_union: ResolvedUnion
     ) -> Result<Self, Error> {
         let v = match self {
             // Both are unions case.
@@ -1073,126 +1035,116 @@ impl Value {
             // Reader is a union, but writer is not.
             v => v,
         };
-        let (i, inner) = schema
-            .find_schema_with_known_schemata(&v, Some(names), enclosing_namespace)
-            .ok_or_else(|| Details::FindUnionVariant {
-                schema: schema.clone(),
+        // our value is not a union, hence, we need to look at the union schema and find a match
+        // TODO: I think the precise semantics of this could be made more inline with the
+        // specification. For instance....
+        let union_schema = resolved_union.get_union_schema();
+        let value_schema_kind = SchemaKind::from(&v);
+        let resolved_nodes = resolved_union.resolve_schemas();
+        if let Some(i) = union_schema.get_variant_index(&value_schema_kind) {
+            // fast path
+            Ok( Value::Union(
+                    i as u32,
+                    Box::new(v.resolve_internal(resolved_nodes.get(i).unwrap().clone())?))
+                )
+        } else {
+            // slow path (required for matching logical or named types)
+            let (i,node) = resolved_union.resolve_schemas().into_iter().enumerate().find(|(_, resolved_node)| {
+               v
+                    .clone()
+                    .resolve_internal(resolved_node.clone())
+                    .is_ok()
+            }).ok_or_else(|| Details::FindUnionVariant {
+                schema: resolved_union.get_union_schema().clone(),
                 value: v.clone(),
             })?;
 
-        Ok(Value::Union(
-            i as u32,
-            Box::new(v.resolve_internal(inner, names, enclosing_namespace, field_default)?),
-        ))
+            Ok( Value::Union(
+                    i as u32,
+                    Box::new(v.resolve_internal(node)?))
+                )
+        }
     }
 
-    fn resolve_array<S: Borrow<Schema> + Debug>(
+    fn resolve_array(
         self,
-        schema: &Schema,
-        names: &HashMap<Name, S>,
-        enclosing_namespace: &Namespace,
+        resolved_array: ResolvedArray,
     ) -> Result<Self, Error> {
+        let items_resolved = resolved_array.resolve_items();
         match self {
             Value::Array(items) => Ok(Value::Array(
                 items
                     .into_iter()
-                    .map(|item| item.resolve_internal(schema, names, enclosing_namespace, &None))
+                    .map(|item| item.resolve_internal(items_resolved.clone()))
                     .collect::<Result<_, _>>()?,
             )),
             other => Err(Details::GetArray {
-                expected: schema.into(),
+                expected: resolved_array.get_schema().into(),
                 other,
             }
             .into()),
         }
     }
 
-    fn resolve_map<S: Borrow<Schema> + Debug>(
+    fn resolve_map(
         self,
-        schema: &Schema,
-        names: &HashMap<Name, S>,
-        enclosing_namespace: &Namespace,
+        resolved_map: ResolvedMap,
     ) -> Result<Self, Error> {
+        let resolved_types = resolved_map.resolve_types();
         match self {
             Value::Map(items) => Ok(Value::Map(
                 items
                     .into_iter()
                     .map(|(key, value)| {
                         value
-                            .resolve_internal(schema, names, enclosing_namespace, &None)
+                            .resolve_internal(resolved_types.clone())
                             .map(|value| (key, value))
                     })
                     .collect::<Result<_, _>>()?,
             )),
             other => Err(Details::GetMap {
-                expected: schema.into(),
+                expected: resolved_map.get_schema().into(),
                 other,
             }
             .into()),
         }
     }
 
-    fn resolve_record<S: Borrow<Schema> + Debug>(
+    fn resolve_record(
         self,
-        fields: &[RecordField],
-        names: &HashMap<Name, S>,
-        enclosing_namespace: &Namespace,
+        resolved_record: ResolvedRecord
     ) -> Result<Self, Error> {
+        let resolved_fields = resolved_record.resolve_fields();
         let mut items = match self {
             Value::Map(items) => Ok(items),
             Value::Record(fields) => Ok(fields.into_iter().collect::<HashMap<_, _>>()),
             other => Err(Error::new(Details::GetRecord {
-                expected: fields
+                expected: resolved_fields
                     .iter()
-                    .map(|field| (field.name.clone(), field.schema.clone().into()))
+                    .map(|field| (field.get_record_field().name.clone(),
+                                  field.get_record_field().schema.clone().into())
+                                )
                     .collect(),
                 other,
             })),
         }?;
 
-        let new_fields = fields
+        let new_fields = resolved_fields
             .iter()
             .map(|field| {
-                let value = match items.remove(&field.name) {
+                let record_field = field.get_record_field();
+                let value = match items.remove(&record_field.name) {
                     Some(value) => value,
-                    None => match field.default {
-                        Some(ref value) => match field.schema {
-                            Schema::Enum(EnumSchema {
-                                ref symbols,
-                                ref default,
-                                ..
-                            }) => Value::from(value.clone()).resolve_enum(
-                                symbols,
-                                default,
-                                &field.default.clone(),
-                            )?,
-                            Schema::Union(ref union_schema) => {
-                                let first = &union_schema.variants()[0];
-                                // NOTE: this match exists only to optimize null defaults for large
-                                // backward-compatible schemas with many nullable fields
-                                match first {
-                                    Schema::Null => Value::Union(0, Box::new(Value::Null)),
-                                    _ => Value::Union(
-                                        0,
-                                        Box::new(Value::from(value.clone()).resolve_internal(
-                                            first,
-                                            names,
-                                            enclosing_namespace,
-                                            &field.default,
-                                        )?),
-                                    ),
-                                }
-                            }
-                            _ => Value::from(value.clone()),
-                        },
+                    None => match record_field.default {
+                        Some(ref value) => Value::from(value.clone()),
                         None => {
-                            return Err(Details::GetField(field.name.clone()).into());
+                            return Err(Details::GetField(field.get_record_field().name.clone()).into());
                         }
                     },
                 };
                 value
-                    .resolve_internal(&field.schema, names, enclosing_namespace, &field.default)
-                    .map(|value| (field.name.clone(), value))
+                    .resolve_internal(field.resolve_field())
+                    .map(|value| (field.get_record_field().name.clone(), value))
             })
             .collect::<Result<Vec<_>, _>>()?;
 
