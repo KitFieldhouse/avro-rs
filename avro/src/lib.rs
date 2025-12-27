@@ -959,6 +959,7 @@ pub mod rabin;
 pub mod schema;
 pub mod schema_compatibility;
 pub mod schema_equality;
+pub mod resolving;
 pub mod types;
 pub mod util;
 pub mod validator;
