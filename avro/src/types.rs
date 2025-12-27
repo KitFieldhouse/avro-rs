@@ -844,7 +844,6 @@ impl Value {
     fn resolve_int(self) -> Result<Self, Error> {
         match self {
             Value::Int(n) => Ok(Value::Int(n)),
-            Value::Long(n) => Ok(Value::Int(n as i32)),
             other => Err(Details::GetInt(other).into()),
         }
     }
