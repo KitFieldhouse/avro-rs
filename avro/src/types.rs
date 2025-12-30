@@ -47,6 +47,38 @@ pub struct TypedValue{
     schema: ResolvedSchema
 }
 
+/// A complete value is a value that has been verified against some
+/// schema. TODO: work on documentation.
+pub enum CompleteValue {
+    Null,
+    Boolean(bool),
+    Int(i32),
+    Long(i64),
+    Float(f32),
+    Double(f64),
+    Bytes(Vec<u8>),
+    UnionBranch(usize, Box<CompleteValue>),
+    String(String),
+    Fixed(Name, usize, Vec<u8>),
+    EnumVariant(Name, String, usize),
+    Array(Vec<Value>),
+    Map(HashMap<String, Value>),
+    Record(Name, Vec<(String, Value)>),
+    Date(i32),
+    Decimal(Decimal),
+    BigDecimal(BigDecimal),
+    TimeMillis(i32),
+    TimeMicros(i64),
+    TimestampMillis(i64),
+    TimestampMicros(i64),
+    TimestampNanos(i64),
+    LocalTimestampMillis(i64),
+    LocalTimestampMicros(i64),
+    LocalTimestampNanos(i64),
+    Duration(Duration),
+    Uuid(Uuid),
+}
+
 /// A valid Avro value. This value exists independent of a specific schema.
 ///
 /// More information about Avro values can be found in the [Avro
@@ -72,21 +104,9 @@ pub enum Value {
     String(String),
     /// A `fixed` Avro value.
     /// The size of the fixed value is represented as a `usize`.
-    Fixed(usize, Vec<u8>),
-    /// An `enum` Avro value.
-    ///
-    /// An Enum is represented by a symbol and its position in the symbols list
-    /// of its corresponding schema.
-    /// This allows schema-less encoding, as well as schema resolution while
-    /// reading values.
-    Enum(u32, String),
-    /// An `union` Avro value.
-    ///
-    /// A Union is represented by the value it holds and its position in the type list
-    /// of its corresponding schema
-    /// This allows schema-less encoding, as well as schema resolution while
-    /// reading values.
-    Union(u32, Box<Value>),
+    Fixed(Option<Name>, usize, Vec<u8>),
+    /// An `enum` Avro variant.
+    EnumVariant(Option<Name>, String),
     /// An `array` Avro value.
     Array(Vec<Value>),
     /// A `map` Avro value.
@@ -97,7 +117,7 @@ pub enum Value {
     /// This allows schema-less encoding.
     ///
     /// See [Record](types.Record) for a more user-friendly support.
-    Record(Vec<(String, Value)>),
+    Record(Option<Name>, Vec<(String, Value)>),
     /// A date value.
     ///
     /// Serialized and deserialized as `i32` directly. Can only be deserialized properly with a
