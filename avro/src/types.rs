@@ -40,7 +40,14 @@ fn max_prec_for_len(len: usize) -> Result<usize, Error> {
     Ok((2.0_f64.powi(8 * len - 1) - 1.0).log10().floor() as usize)
 }
 
-/// A valid Avro value.
+/// An Avro value that has been checked against and coerced to abide by a schema.
+/// This is generally not supposed to be a user-constructed type.
+pub struct TypedValue{
+    value: CompleteValue,
+    schema: ResolvedSchema
+}
+
+/// A valid Avro value. This value exists independent of a specific schema.
 ///
 /// More information about Avro values can be found in the [Avro
 /// Specification](https://avro.apache.org/docs/current/specification/#schema-declaration)
@@ -604,17 +611,24 @@ impl Value {
         }
     }
 
-    /// Resolve this value (self) with provided resolved schema.
-    /// This resolution techinically follows a superset of the the schema resolution
-    /// rules defined by the specification. TODO: documentation
-    pub fn resolve_schemata(self, resolved: ResolvedSchema) -> AvroResult<Self> {
-        self.resolve_internal(ResolvedNode::new(&resolved))
+    /// If possible, coerces the value into being an instance of the provided schema.
+    /// Follows these coercion rules:
+    ///     - Int -> Long
+    ///     - Long -> Float
+    ///     - Float -> Double
+    ///     TODO: Fill this out, these aren't all of the rules!
+    pub fn type_value(self, resolved: ResolvedSchema) -> AvroResult<TypedValue> {
+        let coerced = self.coerce_internal(ResolvedNode::new(&resolved))?;
+        Ok(TypedValue{
+            value: coerced,
+            schema: resolved
+        })
     }
 
-    pub(crate) fn resolve_internal(
+    pub(crate) fn coerce_internal(
         mut self,
         node: ResolvedNode
-    ) -> AvroResult<Self> {
+    ) -> AvroResult<Value> {
         // Check if this schema is a union, and if the reader schema is not.
         if SchemaKind::from(&self) == SchemaKind::Union
             && SchemaKind::from(node.get_schema()) != SchemaKind::Union
