@@ -336,6 +336,10 @@ impl<'a> ResolvedNode<'a> {
            Self::Decimal(schema, _) => schema
        }
    }
+
+   pub fn get_name(&self) -> Option<Arc<Name>>{
+       self.get_schema().name()
+   }
 }
 
 impl<'a> ResolvedMap<'a>{
