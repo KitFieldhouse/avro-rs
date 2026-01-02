@@ -169,6 +169,9 @@ pub enum Details {
     #[error("Unable to decode enum index")]
     GetEnumUnknownIndexValue,
 
+    #[error("Expected Enum with name {schema_name}, got name {value_name}")]
+    CompareEnumName{schema_name: Name, value_name: Name},
+
     #[error("Scale {scale} is greater than precision {precision}")]
     GetScaleAndPrecision { scale: usize, precision: usize },
 
@@ -194,6 +197,9 @@ pub enum Details {
 
     #[error("Missing field in record: {0:?}")]
     GetField(String),
+
+    #[error("Value has more fields than schema was expecting. Fields in question: {0:?}")]
+    MoreRecordFields(Vec<String>),
 
     #[error("Unable to convert to u8, got {0:?}")]
     GetU8(Value),
@@ -258,8 +264,14 @@ pub enum Details {
     #[error("Expected Value::Enum, got: {0:?}")]
     GetEnum(Value),
 
+    #[error("Trying to coerce a value that is not Value::EnumVariant or Value::String into a Enum schema type. Value: {0:?}")]
+    CantCoerceToEnum(Value),
+
     #[error("Fixed size mismatch, expected: {size}, got: {n}")]
     CompareFixedSizes { size: usize, n: usize },
+
+    #[error("Name of Fixed mismatch, expected from schema: {schema_name}, got: {value_name}")]
+    CompareFixedNames { schema_name: Name, value_name: Name },
 
     #[error("String expected for fixed, got: {0:?}")]
     GetStringForFixed(Value),
@@ -279,6 +291,10 @@ pub enum Details {
     #[error("Could not find matching type in {schema:?} for {value:?}")]
     FindUnionVariant { schema: UnionSchema, value: Value },
 
+    #[error("Multiple matches on type {kind:?} for value {value:?}, please provide name to
+        remove ambiguity.")]
+    UnionCoercedDuplicates { kind: SchemaKind, value: Value },
+
     #[error("Union type should not be empty")]
     EmptyUnion,
 
@@ -292,6 +308,13 @@ pub enum Details {
     GetRecord {
         expected: Vec<(String, SchemaKind)>,
         other: Value,
+    },
+
+    #[error("Schema specifies record with name {schema_name:?}, got a value with
+        name {value_name:?}.")]
+    GetRecordName {
+        schema_name: Name,
+        value_name: Name,
     },
 
     #[error("No `name` field")]
