@@ -17,15 +17,10 @@
 
 //! Logic for parsing and interacting with schemas in Avro format.
 use crate::{
-    AvroResult,
-    error::{Details, Error},
-    schema_equality, types,
-    util::MapHelper,
-    validator::{
+    error::{Details, Error}, resolving::{ResolvedNode, ResolvedSchema}, schema_equality, types, util::MapHelper, validator::{
         validate_enum_symbol_name, validate_namespace, validate_record_field_name,
         validate_schema_name,
-    },
-    resolving::ResolvedSchema
+    }, AvroResult
 };
 use digest::{typenum::Le, Digest};
 use log::{debug, error, warn};
@@ -309,6 +304,40 @@ impl From<&types::Value> for SchemaKind {
             Value::LocalTimestampMicros(_) => Self::LocalTimestampMicros,
             Value::LocalTimestampNanos(_) => Self::LocalTimestampNanos,
             Value::Duration { .. } => Self::Duration,
+        }
+    }
+}
+
+impl From<&ResolvedNode<'_>> for SchemaKind {
+    fn from(node: &ResolvedNode) -> Self {
+        match node {
+            ResolvedNode::Null(_) => Self::Null,
+            ResolvedNode::Boolean(_) => Self::Boolean,
+            ResolvedNode::Int(_) => Self::Int,
+            ResolvedNode::Long(_) => Self::Long,
+            ResolvedNode::Float(_) => Self::Float,
+            ResolvedNode::Double(_) => Self::Double,
+            ResolvedNode::Bytes(_) => Self::Bytes,
+            ResolvedNode::String(_) => Self::String,
+            ResolvedNode::Array(_) => Self::Array,
+            ResolvedNode::Map(_) => Self::Map,
+            ResolvedNode::Union(_) => Self::Union,
+            ResolvedNode::Record(_) => Self::Record,
+            ResolvedNode::Enum(_, _) => Self::Enum,
+            ResolvedNode::Fixed(_, _) => Self::Fixed,
+            ResolvedNode::Decimal { .. } => Self::Decimal,
+            ResolvedNode::BigDecimal(_) => Self::BigDecimal,
+            ResolvedNode::Uuid(_) => Self::Uuid,
+            ResolvedNode::Date(_) => Self::Date,
+            ResolvedNode::TimeMillis(_) => Self::TimeMillis,
+            ResolvedNode::TimeMicros(_) => Self::TimeMicros,
+            ResolvedNode::TimestampMillis(_) => Self::TimestampMillis,
+            ResolvedNode::TimestampMicros(_) => Self::TimestampMicros,
+            ResolvedNode::TimestampNanos(_) => Self::TimestampNanos,
+            ResolvedNode::LocalTimestampMillis(_) => Self::LocalTimestampMillis,
+            ResolvedNode::LocalTimestampMicros(_) => Self::LocalTimestampMicros,
+            ResolvedNode::LocalTimestampNanos(_) => Self::LocalTimestampNanos,
+            ResolvedNode::Duration { .. } => Self::Duration
         }
     }
 }
