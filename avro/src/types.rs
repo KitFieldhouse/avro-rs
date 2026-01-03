@@ -24,13 +24,14 @@ use crate::{
 use bigdecimal::BigDecimal;
 use log::{debug, error};
 use rand::seq::index;
-use serde_json::{Number, Value as JsonValue};
+use serde_json::{ser::CompactFormatter, Number, Value as JsonValue};
 use std::{
     borrow::Borrow,
     collections::{BTreeMap, HashMap},
     fmt::Debug,
     hash::BuildHasher,
     str::FromStr,
+    sync::Arc
 };
 use uuid::Uuid;
 
@@ -59,11 +60,11 @@ pub enum CompleteValue {
     Bytes(Vec<u8>),
     UnionBranch(usize, Box<CompleteValue>),
     String(String),
-    Fixed(Name, usize, Vec<u8>),
-    EnumVariant(Name, String, usize),
-    Array(Vec<Value>),
-    Map(HashMap<String, Value>),
-    Record(Name, Vec<(String, Value)>),
+    Fixed(Arc<Name>, usize, Vec<u8>),
+    EnumVariant(Arc<Name>, String, usize),
+    Array(Vec<CompleteValue>),
+    Map(HashMap<String, CompleteValue>),
+    Record(Arc<Name>, HashMap<String, CompleteValue>),
     Date(i32),
     Decimal(Decimal),
     BigDecimal(BigDecimal),
@@ -100,11 +101,10 @@ pub enum Value {
     Double(f64),
     /// A `bytes` Avro value.
     Bytes(Vec<u8>),
+    /// A "fixed" Avro value.
+    Fixed(Option<Name>, Vec<u8>),
     /// A `string` Avro value.
     String(String),
-    /// A `fixed` Avro value.
-    /// The size of the fixed value is represented as a `usize`.
-    Fixed(Option<Name>, usize, Vec<u8>),
     /// An `enum` Avro variant.
     EnumVariant(Option<Name>, String),
     /// An `array` Avro value.
@@ -113,11 +113,8 @@ pub enum Value {
     Map(HashMap<String, Value>),
     /// A `record` Avro value.
     ///
-    /// A Record is represented by a vector of (`<record name>`, `value`).
-    /// This allows schema-less encoding.
-    ///
     /// See [Record](types.Record) for a more user-friendly support.
-    Record(Option<Name>, Vec<(String, Value)>),
+    Record(Option<Name>, HashMap<String,Value>),
     /// A date value.
     ///
     /// Serialized and deserialized as `i32` directly. Can only be deserialized properly with a
@@ -378,6 +375,47 @@ impl TryFrom<Value> for JsonValue {
 }
 
 impl Value {
+
+    pub fn get_expected_schema_kind(&self) -> SchemaKind{
+        match *self{
+            Value::Null => SchemaKind::Null,
+            Value::Boolean(_) => SchemaKind::Boolean,
+            Value::Int(_) => SchemaKind::Int,
+            Value::Long(_) => SchemaKind::Long,
+            Value::Float(_) => SchemaKind::Float,
+            Value::Double(_) => SchemaKind::Double,
+            Value::Bytes(_) => SchemaKind::Bytes,
+            Value::Fixed(_,_) => SchemaKind::Fixed,
+            Value::String(_) => SchemaKind::String,
+            Value::EnumVariant(_,_) => SchemaKind::Enum,
+            Value::Array(_) => SchemaKind::Array,
+            Value::Map(_) => SchemaKind::Map,
+            Value::Record(_,_) => SchemaKind::Record,
+            Value::Date(_) => SchemaKind::Date,
+            Value::Decimal(_) => SchemaKind::Decimal,
+            Value::BigDecimal(_) => SchemaKind::BigDecimal,
+            Value::TimeMillis(_) => SchemaKind::TimeMillis,
+            Value::TimeMicros(_) => SchemaKind::TimeMicros,
+            Value::TimestampMillis(_) => SchemaKind::TimestampMillis,
+            Value::TimestampMicros(_) => SchemaKind::TimestampMicros,
+            Value::TimestampNanos(_)  => SchemaKind::TimestampNanos,
+            Value::LocalTimestampMillis(_) => SchemaKind::LocalTimestampMillis,
+            Value::LocalTimestampMicros(_) => SchemaKind::LocalTimestampMicros,
+            Value::LocalTimestampNanos(_)  => SchemaKind::LocalTimestampNanos,
+            Value::Duration(_) => SchemaKind::Duration,
+            Value::Uuid(_) => SchemaKind::Uuid,
+        }
+    }
+
+    pub fn get_named_type_name(&self) -> Option<&Name>{
+        match self{
+            Value::Fixed(name,_) => name.as_ref(),
+            Value::Record(name,_) => name.as_ref(),
+            Value::EnumVariant(name,_) => name.as_ref(),
+            _ => Option::None
+        }
+    }
+
     /// Validate the value against the given [Schema](../schema/enum.Schema.html).
     ///
     /// See the [Avro specification](https://avro.apache.org/docs/current/specification)
@@ -646,91 +684,81 @@ impl Value {
     }
 
     pub(crate) fn coerce_internal(
-        mut self,
+        self,
         node: ResolvedNode
-    ) -> AvroResult<Value> {
-        // Check if this schema is a union, and if the reader schema is not.
-        if SchemaKind::from(&self) == SchemaKind::Union
-            && SchemaKind::from(node.get_schema()) != SchemaKind::Union
-        {
-            // Pull out the Union, and attempt to resolve against it.
-            let v = match self {
-                Value::Union(_i, b) => *b,
-                _ => unreachable!(),
-            };
-            self = v;
-        }
+    ) -> AvroResult<CompleteValue> {
         match node {
-            ResolvedNode::Null(_) => self.resolve_null(),
-            ResolvedNode::Boolean(_) => self.resolve_boolean(),
-            ResolvedNode::Int(_) => self.resolve_int(),
-            ResolvedNode::Long(_) => self.resolve_long(),
-            ResolvedNode::Float(_) => self.resolve_float(),
-            ResolvedNode::Double(_) => self.resolve_double(),
-            ResolvedNode::Bytes(_) => self.resolve_bytes(),
-            ResolvedNode::String(_) => self.resolve_string(),
-            ResolvedNode::Fixed(_, FixedSchema { size, .. }) => self.resolve_fixed(*size),
+            ResolvedNode::Null(_) => self.coerce_null(),
+            ResolvedNode::Boolean(_) => self.coerce_boolean(),
+            ResolvedNode::Int(_) => self.coerce_int(),
+            ResolvedNode::Long(_) => self.coerce_long(),
+            ResolvedNode::Float(_) => self.coerce_float(),
+            ResolvedNode::Double(_) => self.coerce_double(),
+            ResolvedNode::Bytes(_) => self.coerce_bytes(),
+            ResolvedNode::String(_) => self.coerce_string(),
+            ResolvedNode::Fixed(_, FixedSchema { size, name, .. }) => self.coerce_fixed(*size, Arc::clone(name)),
             ResolvedNode::Enum(_, EnumSchema {
                 symbols,
-                default,
+                name,
                 ..
-            }) => self.resolve_enum(symbols, default),
-            ResolvedNode::BigDecimal(_) => self.resolve_bigdecimal(),
-            ResolvedNode::Date(_) => self.resolve_date(),
-            ResolvedNode::TimeMillis(_) => self.resolve_time_millis(),
-            ResolvedNode::TimeMicros(_) => self.resolve_time_micros(),
-            ResolvedNode::TimestampMillis(_) => self.resolve_timestamp_millis(),
-            ResolvedNode::TimestampMicros(_) => self.resolve_timestamp_micros(),
-            ResolvedNode::TimestampNanos(_) => self.resolve_timestamp_nanos(),
-            ResolvedNode::LocalTimestampMillis(_) => self.resolve_local_timestamp_millis(),
-            ResolvedNode::LocalTimestampMicros(_) => self.resolve_local_timestamp_micros(),
-            ResolvedNode::LocalTimestampNanos(_) => self.resolve_local_timestamp_nanos(),
-            ResolvedNode::Duration(_) => self.resolve_duration(),
-            ResolvedNode::Uuid(_) => self.resolve_uuid(),
+            }) => self.coerce_enum(Arc::clone(name), symbols),
+            ResolvedNode::BigDecimal(_) => self.coerce_bigdecimal(),
+            ResolvedNode::Date(_) => self.coerce_date(),
+            ResolvedNode::TimeMillis(_) => self.coerce_time_millis(),
+            ResolvedNode::TimeMicros(_) => self.coerce_time_micros(),
+            ResolvedNode::TimestampMillis(_) => self.coerce_timestamp_millis(),
+            ResolvedNode::TimestampMicros(_) => self.coerce_timestamp_micros(),
+            ResolvedNode::TimestampNanos(_) => self.coerce_timestamp_nanos(),
+            ResolvedNode::LocalTimestampMillis(_) => self.coerce_local_timestamp_millis(),
+            ResolvedNode::LocalTimestampMicros(_) => self.coerce_local_timestamp_micros(),
+            ResolvedNode::LocalTimestampNanos(_) => self.coerce_local_timestamp_nanos(),
+            ResolvedNode::Duration(_) => self.coerce_duration(),
+            ResolvedNode::Uuid(_) => self.coerce_uuid(),
             ResolvedNode::Decimal(_, DecimalSchema {
                 scale,
                 precision,
                 inner,
-            }) => self.resolve_decimal(precision, scale, inner),
+            }) => self.coerce_decimal(precision, scale, inner),
             ResolvedNode::Union(resolved_union) => {
-                self.resolve_union(resolved_union)
+                self.coerce_union(resolved_union)
             }
             ResolvedNode::Array(resolved_array) => {
-                self.resolve_array(resolved_array)
+                self.coerce_array(resolved_array)
             }
-            ResolvedNode::Map(resolved_map) => self.resolve_map(resolved_map),
+            ResolvedNode::Map(resolved_map) => self.coerce_map(resolved_map),
             ResolvedNode::Record(resolved_record) => {
-                self.resolve_record(resolved_record)
+                let name = Arc::clone(&resolved_record.get_record_schema().name);
+                self.coerce_record(resolved_record, name)
             }
         }
     }
 
-    fn resolve_uuid(self) -> Result<Self, Error> {
+    fn coerce_uuid(self) -> Result<CompleteValue, Error> {
         Ok(match self {
-            uuid @ Value::Uuid(_) => uuid,
+            Value::Uuid(uuid) => CompleteValue::Uuid(uuid),
             Value::String(ref string) => {
-                Value::Uuid(Uuid::from_str(string).map_err(Details::ConvertStrToUuid)?)
+                CompleteValue::Uuid(Uuid::from_str(string).map_err(Details::ConvertStrToUuid)?)
             }
             other => return Err(Details::GetUuid(other).into()),
         })
     }
 
-    fn resolve_bigdecimal(self) -> Result<Self, Error> {
+    fn coerce_bigdecimal(self) -> Result<CompleteValue, Error> {
         Ok(match self {
-            bg @ Value::BigDecimal(_) => bg,
-            Value::Bytes(b) => Value::BigDecimal(deserialize_big_decimal(&b).unwrap()),
+            Value::BigDecimal(bytes) => CompleteValue::BigDecimal(bytes),
+            Value::Bytes(b) => CompleteValue::BigDecimal(deserialize_big_decimal(&b).unwrap()),
             other => return Err(Details::GetBigDecimal(other).into()),
         })
     }
 
-    fn resolve_duration(self) -> Result<Self, Error> {
+    fn coerce_duration(self) -> Result<CompleteValue, Error> {
         Ok(match self {
-            duration @ Value::Duration { .. } => duration,
-            Value::Fixed(size, bytes) => {
-                if size != 12 {
-                    return Err(Details::GetDecimalFixedBytes(size).into());
+            Value::Duration(duration) => CompleteValue::Duration(duration),
+            Value::Fixed(_, bytes) => {
+                if bytes.len() != 12 {
+                    return Err(Details::GetDecimalFixedBytes(bytes.len()).into());
                 }
-                Value::Duration(Duration::from([
+                CompleteValue::Duration(Duration::from([
                     bytes[0], bytes[1], bytes[2], bytes[3], bytes[4], bytes[5], bytes[6], bytes[7],
                     bytes[8], bytes[9], bytes[10], bytes[11],
                 ]))
@@ -739,12 +767,12 @@ impl Value {
         })
     }
 
-    fn resolve_decimal(
+    fn coerce_decimal(
         self,
         precision: &Precision,
         scale: &Scale,
         inner: &Schema,
-    ) -> Result<Self, Error> {
+    ) -> Result<CompleteValue, Error> {
         if scale > precision {
             return Err(Details::GetScaleAndPrecision { scale: *scale, precision: *precision }.into());
         }
@@ -767,7 +795,7 @@ impl Value {
                     }
                     .into())
                 } else {
-                    Ok(Value::Decimal(num))
+                    Ok(CompleteValue::Decimal(num))
                 }
                 // check num.bits() here
             }
@@ -780,138 +808,138 @@ impl Value {
                     .into())
                 } else {
                     // precision and scale match, can we assume the underlying type can hold the data?
-                    Ok(Value::Decimal(Decimal::from(bytes)))
+                    Ok(CompleteValue::Decimal(Decimal::from(bytes)))
                 }
             }
             other => Err(Details::ResolveDecimal(other).into()),
         }
     }
 
-    fn resolve_date(self) -> Result<Self, Error> {
+    fn coerce_date(self) -> Result<CompleteValue, Error> {
         match self {
-            Value::Date(d) | Value::Int(d) => Ok(Value::Date(d)),
+            Value::Date(d) | Value::Int(d) => Ok(CompleteValue::Date(d)),
             other => Err(Details::GetDate(other).into()),
         }
     }
 
-    fn resolve_time_millis(self) -> Result<Self, Error> {
+    fn coerce_time_millis(self) -> Result<CompleteValue, Error> {
         match self {
-            Value::TimeMillis(t) | Value::Int(t) => Ok(Value::TimeMillis(t)),
+            Value::TimeMillis(t) | Value::Int(t) => Ok(CompleteValue::TimeMillis(t)),
             other => Err(Details::GetTimeMillis(other).into()),
         }
     }
 
-    fn resolve_time_micros(self) -> Result<Self, Error> {
+    fn coerce_time_micros(self) -> Result<CompleteValue, Error> {
         match self {
-            Value::TimeMicros(t) | Value::Long(t) => Ok(Value::TimeMicros(t)),
-            Value::Int(t) => Ok(Value::TimeMicros(i64::from(t))),
+            Value::TimeMicros(t) | Value::Long(t) => Ok(CompleteValue::TimeMicros(t)),
+            Value::Int(t) => Ok(CompleteValue::TimeMicros(i64::from(t))),
             other => Err(Details::GetTimeMicros(other).into()),
         }
     }
 
-    fn resolve_timestamp_millis(self) -> Result<Self, Error> {
+    fn coerce_timestamp_millis(self) -> Result<CompleteValue, Error> {
         match self {
-            Value::TimestampMillis(ts) | Value::Long(ts) => Ok(Value::TimestampMillis(ts)),
-            Value::Int(ts) => Ok(Value::TimestampMillis(i64::from(ts))),
+            Value::TimestampMillis(ts) | Value::Long(ts) => Ok(CompleteValue::TimestampMillis(ts)),
+            Value::Int(ts) => Ok(CompleteValue::TimestampMillis(i64::from(ts))),
             other => Err(Details::GetTimestampMillis(other).into()),
         }
     }
 
-    fn resolve_timestamp_micros(self) -> Result<Self, Error> {
+    fn coerce_timestamp_micros(self) -> Result<CompleteValue, Error> {
         match self {
-            Value::TimestampMicros(ts) | Value::Long(ts) => Ok(Value::TimestampMicros(ts)),
-            Value::Int(ts) => Ok(Value::TimestampMicros(i64::from(ts))),
+            Value::TimestampMicros(ts) | Value::Long(ts) => Ok(CompleteValue::TimestampMicros(ts)),
+            Value::Int(ts) => Ok(CompleteValue::TimestampMicros(i64::from(ts))),
             other => Err(Details::GetTimestampMicros(other).into()),
         }
     }
 
-    fn resolve_timestamp_nanos(self) -> Result<Self, Error> {
+    fn coerce_timestamp_nanos(self) -> Result<CompleteValue, Error> {
         match self {
-            Value::TimestampNanos(ts) | Value::Long(ts) => Ok(Value::TimestampNanos(ts)),
-            Value::Int(ts) => Ok(Value::TimestampNanos(i64::from(ts))),
+            Value::TimestampNanos(ts) | Value::Long(ts) => Ok(CompleteValue::TimestampNanos(ts)),
+            Value::Int(ts) => Ok(CompleteValue::TimestampNanos(i64::from(ts))),
             other => Err(Details::GetTimestampNanos(other).into()),
         }
     }
 
-    fn resolve_local_timestamp_millis(self) -> Result<Self, Error> {
+    fn coerce_local_timestamp_millis(self) -> Result<CompleteValue, Error> {
         match self {
             Value::LocalTimestampMillis(ts) | Value::Long(ts) => {
-                Ok(Value::LocalTimestampMillis(ts))
+                Ok(CompleteValue::LocalTimestampMillis(ts))
             }
-            Value::Int(ts) => Ok(Value::LocalTimestampMillis(i64::from(ts))),
+            Value::Int(ts) => Ok(CompleteValue::LocalTimestampMillis(i64::from(ts))),
             other => Err(Details::GetLocalTimestampMillis(other).into()),
         }
     }
 
-    fn resolve_local_timestamp_micros(self) -> Result<Self, Error> {
+    fn coerce_local_timestamp_micros(self) -> Result<CompleteValue, Error> {
         match self {
             Value::LocalTimestampMicros(ts) | Value::Long(ts) => {
-                Ok(Value::LocalTimestampMicros(ts))
+                Ok(CompleteValue::LocalTimestampMicros(ts))
             }
-            Value::Int(ts) => Ok(Value::LocalTimestampMicros(i64::from(ts))),
+            Value::Int(ts) => Ok(CompleteValue::LocalTimestampMicros(i64::from(ts))),
             other => Err(Details::GetLocalTimestampMicros(other).into()),
         }
     }
 
-    fn resolve_local_timestamp_nanos(self) -> Result<Self, Error> {
+    fn coerce_local_timestamp_nanos(self) -> Result<CompleteValue, Error> {
         match self {
-            Value::LocalTimestampNanos(ts) | Value::Long(ts) => Ok(Value::LocalTimestampNanos(ts)),
-            Value::Int(ts) => Ok(Value::LocalTimestampNanos(i64::from(ts))),
+            Value::LocalTimestampNanos(ts) | Value::Long(ts) => Ok(CompleteValue::LocalTimestampNanos(ts)),
+            Value::Int(ts) => Ok(CompleteValue::LocalTimestampNanos(i64::from(ts))),
             other => Err(Details::GetLocalTimestampNanos(other).into()),
         }
     }
 
-    fn resolve_null(self) -> Result<Self, Error> {
+    fn coerce_null(self) -> Result<CompleteValue, Error> {
         match self {
-            Value::Null => Ok(Value::Null),
+            Value::Null => Ok(CompleteValue::Null),
             other => Err(Details::GetNull(other).into()),
         }
     }
 
-    fn resolve_boolean(self) -> Result<Self, Error> {
+    fn coerce_boolean(self) -> Result<CompleteValue, Error> {
         match self {
-            Value::Boolean(b) => Ok(Value::Boolean(b)),
+            Value::Boolean(b) => Ok(CompleteValue::Boolean(b)),
             other => Err(Details::GetBoolean(other).into()),
         }
     }
 
-    fn resolve_int(self) -> Result<Self, Error> {
+    fn coerce_int(self) -> Result<CompleteValue, Error> {
         match self {
-            Value::Int(n) => Ok(Value::Int(n)),
+            Value::Int(n) => Ok(CompleteValue::Int(n)),
             other => Err(Details::GetInt(other).into()),
         }
     }
 
-    fn resolve_long(self) -> Result<Self, Error> {
+    fn coerce_long(self) -> Result<CompleteValue, Error> {
         match self {
-            Value::Int(n) => Ok(Value::Long(i64::from(n))),
-            Value::Long(n) => Ok(Value::Long(n)),
+            Value::Int(n) => Ok(CompleteValue::Long(i64::from(n))),
+            Value::Long(n) => Ok(CompleteValue::Long(n)),
             other => Err(Details::GetLong(other).into()),
         }
     }
 
-    fn resolve_float(self) -> Result<Self, Error> {
+    fn coerce_float(self) -> Result<CompleteValue, Error> {
         match self {
-            Value::Int(n) => Ok(Value::Float(n as f32)),
-            Value::Long(n) => Ok(Value::Float(n as f32)),
-            Value::Float(x) => Ok(Value::Float(x)),
-            Value::Double(x) => Ok(Value::Float(x as f32)),
+            Value::Int(n) => Ok(CompleteValue::Float(n as f32)),
+            Value::Long(n) => Ok(CompleteValue::Float(n as f32)),
+            Value::Float(x) => Ok(CompleteValue::Float(x)),
+            Value::Double(x) => Ok(CompleteValue::Float(x as f32)),
             Value::String(ref x) => match Self::parse_special_float(x) {
-                Some(f) => Ok(Value::Float(f)),
+                Some(f) => Ok(CompleteValue::Float(f)),
                 None => Err(Details::GetFloat(self).into()),
             },
             other => Err(Details::GetFloat(other).into()),
         }
     }
 
-    fn resolve_double(self) -> Result<Self, Error> {
+    fn coerce_double(self) -> Result<CompleteValue, Error> {
         match self {
-            Value::Int(n) => Ok(Value::Double(f64::from(n))),
-            Value::Long(n) => Ok(Value::Double(n as f64)),
-            Value::Float(x) => Ok(Value::Double(f64::from(x))),
-            Value::Double(x) => Ok(Value::Double(x)),
+            Value::Int(n) => Ok(CompleteValue::Double(f64::from(n))),
+            Value::Long(n) => Ok(CompleteValue::Double(n as f64)),
+            Value::Float(x) => Ok(CompleteValue::Double(f64::from(x))),
+            Value::Double(x) => Ok(CompleteValue::Double(x)),
             Value::String(ref x) => match Self::parse_special_float(x) {
-                Some(f) => Ok(Value::Double(f64::from(f))),
+                Some(f) => Ok(CompleteValue::Double(f64::from(f))),
                 None => Err(Details::GetDouble(self).into()),
             },
             other => Err(Details::GetDouble(other).into()),
@@ -929,11 +957,11 @@ impl Value {
         }
     }
 
-    fn resolve_bytes(self) -> Result<Self, Error> {
+    fn coerce_bytes(self) -> Result<CompleteValue, Error> {
         match self {
-            Value::Bytes(bytes) => Ok(Value::Bytes(bytes)),
-            Value::String(s) => Ok(Value::Bytes(s.into_bytes())),
-            Value::Array(items) => Ok(Value::Bytes(
+            Value::Bytes(bytes) => Ok(CompleteValue::Bytes(bytes)),
+            Value::String(s) => Ok(CompleteValue::Bytes(s.into_bytes())),
+            Value::Array(items) => Ok(CompleteValue::Bytes(
                 items
                     .into_iter()
                     .map(Value::try_u8)
@@ -943,29 +971,43 @@ impl Value {
         }
     }
 
-    fn resolve_string(self) -> Result<Self, Error> {
+    fn coerce_string(self) -> Result<CompleteValue, Error> {
         match self {
-            Value::String(s) => Ok(Value::String(s)),
-            Value::Bytes(bytes) | Value::Fixed(_, bytes) => Ok(Value::String(
+            Value::String(s) => Ok(CompleteValue::String(s)),
+            Value::Bytes(bytes) => Ok(CompleteValue::String(
                 String::from_utf8(bytes).map_err(Details::ConvertToUtf8)?,
             )),
             other => Err(Details::GetString(other).into()),
         }
     }
 
-    fn resolve_fixed(self, size: usize) -> Result<Self, Error> {
+    fn coerce_fixed(self, size: usize, schema_name: Arc<Name>) -> Result<CompleteValue, Error> {
         match self {
-            Value::Fixed(n, bytes) => {
-                if n == size {
-                    Ok(Value::Fixed(n, bytes))
-                } else {
-                    Err(Details::CompareFixedSizes { size, n }.into())
+            Value::Fixed(name, arr) => {
+                match name{
+                    Some(ref name) => {
+                        if name == schema_name.as_ref() && arr.len() == size {
+                            Ok(CompleteValue::Fixed(schema_name, size, arr))
+                        } else if name != schema_name.as_ref(){
+                            Err(Details::CompareFixedNames { schema_name: schema_name.as_ref().clone(), value_name: name.clone()}.into())
+                        }else{
+                            Err(Details::CompareFixedSizes { size, n: arr.len() }.into())
+                        }
+                    }
+                    None => {
+                        if arr.len() == size {
+                            Ok(CompleteValue::Fixed(schema_name,size, arr))
+                        } else {
+                            Err(Details::CompareFixedSizes { size, n: arr.len() }.into())
+                        }
+                    }
                 }
             }
-            Value::String(s) => Ok(Value::Fixed(s.len(), s.into_bytes())),
+            Value::String(s) => Ok(CompleteValue::Fixed(schema_name ,s.len(), s.into_bytes())), //TODO:
+                                                                                                //Correct?
             Value::Bytes(s) => {
                 if s.len() == size {
-                    Ok(Value::Fixed(size, s))
+                    Ok(CompleteValue::Fixed(schema_name,size, s))
                 } else {
                     Err(Details::CompareFixedSizes { size, n: s.len() }.into())
                 }
@@ -974,94 +1016,125 @@ impl Value {
         }
     }
 
-    pub(crate) fn resolve_enum(
+    pub(crate) fn coerce_enum(
         self,
-        symbols: &[String],
-        enum_default: &Option<String>
-    ) -> Result<Self, Error> {
-        let validate_symbol = |symbol: String, symbols: &[String]| {
-            if let Some(index) = symbols.iter().position(|item| item == &symbol) {
-                Ok(Value::Enum(index as u32, symbol))
-            } else {
-                match enum_default {
-                    Some(default) => {
-                        if let Some(index) = symbols.iter().position(|item| item == default) {
-                            Ok(Value::Enum(index as u32, default.clone()))
-                        } else {
-                            Err(Details::GetEnumDefault {
-                                symbol,
-                                symbols: symbols.into(),
-                            }
-                            .into())
-                        }
+        schema_name: Arc<Name>,
+        symbols: &[String]
+    ) -> Result<CompleteValue, Error> {
+        match self {
+            Value::String(val) => {
+                let matching_variant = symbols.iter()
+                                        .enumerate()
+                                        .find(|(_index, sym)|{if **sym == val {true} else {false}});
+                match matching_variant{
+                    Some((index, _symbol)) => {
+                        Ok(CompleteValue::EnumVariant(schema_name, val, index))
                     }
-                    _ => Err(Details::GetEnumDefault {
-                        symbol,
-                        symbols: symbols.into(),
+                    None => {
+                        Err(Details::GetEnumSymbol(val).into())
                     }
-                    .into()),
                 }
             }
-        };
-
-        match self {
-            Value::Enum(_raw_index, s) => validate_symbol(s, symbols),
-            Value::String(s) => validate_symbol(s, symbols),
-            other => Err(Details::GetEnum(other).into()),
-        }
+            Value::EnumVariant(name, val) => {
+                let matching_variant = symbols.iter()
+                                        .enumerate()
+                                        .find(|(_index, sym)|{if **sym == val {true} else {false}});
+                match name{
+                    Some(ref name) => {
+                        if name == schema_name.as_ref() {
+                            if let Some((index, _symbol)) = matching_variant{
+                                Ok(CompleteValue::EnumVariant(schema_name, val, index))
+                            }else{
+                                Err(Details::GetEnumSymbol(val).into())
+                            }
+                        }else{
+                            Err(Details::CompareEnumName{schema_name: schema_name.as_ref().clone(),
+                                value_name: name.clone()}.into())
+                        }
+                    }
+                    None => {
+                            if let Some((index, _symbol)) = matching_variant{
+                                Ok(CompleteValue::EnumVariant(schema_name, val, index))
+                            }else{
+                                Err(Details::GetEnumSymbol(val).into())
+                            }
+                    }
+                }
+            }
+            other => {
+                Err(Details::CantCoerceToEnum(other).into())
+            }
+        } 
     }
 
-    fn resolve_union(
+    /// Coercion to union follows these steps:
+    ///      - if value has name, match by name and attempt coercion to matching named schema type.
+    ///      - if value does not have a name, search for a union memeber with the same type. If
+    ///        multiple exist or none exist, throw an error. If exactly one exists, attempt coercion
+    ///        into this union member.
+    /// It should be noted that these rules do not allow the same flexibility of coercion we would
+    /// expect for some types. For instance, if we have Value::Int, we will only match to a union
+    /// branch with type 'int', not 'long'. This is on purpose, since allowing for this "cross-type"
+    /// union branch matching can lead to ambiguities on exactly what branch we should match on.
+    /// These rules force these ambiguities to be resolved by the user of the crate, not the crate itself.
+    fn coerce_union(
         self,
         resolved_union: ResolvedUnion
-    ) -> Result<Self, Error> {
-        let v = match self {
-            // Both are unions case.
-            Value::Union(_i, v) => *v,
-            // Reader is a union, but writer is not.
-            v => v,
-        };
-        // our value is not a union, hence, we need to look at the union schema and find a match
-        // TODO: I think the precise semantics of this could be made more inline with the
-        // specification. For instance....
-        let union_schema = resolved_union.get_union_schema();
-        let value_schema_kind = SchemaKind::from(&v);
-        let resolved_nodes = resolved_union.resolve_schemas();
-        if let Some(i) = union_schema.get_variant_index(&value_schema_kind) {
-            // fast path
-            Ok( Value::Union(
-                    i as u32,
-                    Box::new(v.resolve_internal(resolved_nodes.get(i).unwrap().clone())?))
-                )
-        } else {
-            // slow path (required for matching logical or named types)
-            let (i,node) = resolved_union.resolve_schemas().into_iter().enumerate().find(|(_, resolved_node)| {
-               v
-                    .clone()
-                    .resolve_internal(resolved_node.clone())
-                    .is_ok()
-            }).ok_or_else(|| Details::FindUnionVariant {
-                schema: resolved_union.get_union_schema().clone(),
-                value: v.clone(),
-            })?;
+    ) -> Result<CompleteValue, Error> {
 
-            Ok( Value::Union(
-                    i as u32,
-                    Box::new(v.resolve_internal(node)?))
-                )
+        let expected_value_kind = self.get_expected_schema_kind();
+        let value_name = self.get_named_type_name();
+        let resolved_nodes = resolved_union.resolve_schemas();
+
+        match value_name{
+            Some(name) => {
+                // find branch in this union that matches the name + type
+                let matched_node = resolved_nodes.into_iter().enumerate().find(|(_index, node)| {
+                    if let Some(schema_name) = node.get_name(){
+                        if schema_name.as_ref() == name && expected_value_kind == SchemaKind::from(node) {true} else {false}
+                    }else{
+                        false
+                    }
+                });
+
+                match matched_node{
+                    Some((index, matched)) => {
+                        Ok(CompleteValue::UnionBranch(index,
+                                Box::new(self.coerce_internal(matched)?)))
+                    }
+                    None => Err(Details::FindUnionVariant { schema: resolved_union.get_union_schema().clone(), value: self }.into())
+                }
+            },
+            None => {
+                // find branch in this union that matches schema kind exactly, if multiple,  throw
+                // an error.
+                let matched_nodes : Vec<(usize, ResolvedNode<'_>)> = resolved_nodes.into_iter().enumerate().filter(|(_index, node)| {
+                    if expected_value_kind == SchemaKind::from(node) {true} else {false}
+                }).collect();
+
+                if matched_nodes.len() > 1 {
+                    Err(Details::UnionCoercedDuplicates { kind: expected_value_kind , value: self }.into())
+                }else if matched_nodes.len() == 0 {
+                    Err(Details::FindUnionVariant { schema: resolved_union.get_union_schema().clone(), value: self }.into())
+                }else{
+                    let (index, matched) = matched_nodes.into_iter().nth(0).unwrap();
+                    Ok(CompleteValue::UnionBranch(index,
+                            Box::new(self.coerce_internal(matched)?)))
+                }
+            }
         }
     }
 
-    fn resolve_array(
+    fn coerce_array(
         self,
         resolved_array: ResolvedArray,
-    ) -> Result<Self, Error> {
+    ) -> Result<CompleteValue, Error> {
         let items_resolved = resolved_array.resolve_items();
         match self {
-            Value::Array(items) => Ok(Value::Array(
+            Value::Array(items) => Ok(CompleteValue::Array(
                 items
                     .into_iter()
-                    .map(|item| item.resolve_internal(items_resolved.clone()))
+                    .map(|item| item.coerce_internal(items_resolved.clone()))
                     .collect::<Result<_, _>>()?,
             )),
             other => Err(Details::GetArray {
@@ -1072,18 +1145,18 @@ impl Value {
         }
     }
 
-    fn resolve_map(
+    fn coerce_map(
         self,
         resolved_map: ResolvedMap,
-    ) -> Result<Self, Error> {
+    ) -> Result<CompleteValue, Error> {
         let resolved_types = resolved_map.resolve_types();
         match self {
-            Value::Map(items) => Ok(Value::Map(
+            Value::Map(items) => Ok(CompleteValue::Map(
                 items
                     .into_iter()
                     .map(|(key, value)| {
                         value
-                            .resolve_internal(resolved_types.clone())
+                            .coerce_internal(resolved_types.clone())
                             .map(|value| (key, value))
                     })
                     .collect::<Result<_, _>>()?,
@@ -1096,14 +1169,50 @@ impl Value {
         }
     }
 
-    fn resolve_record(
+    fn coerce_record(
         self,
-        resolved_record: ResolvedRecord
-    ) -> Result<Self, Error> {
+        resolved_record: ResolvedRecord,
+        schema_name: Arc<Name>
+    ) -> Result<CompleteValue, Error> {
         let resolved_fields = resolved_record.resolve_fields();
-        let mut items = match self {
-            Value::Map(items) => Ok(items),
-            Value::Record(fields) => Ok(fields.into_iter().collect::<HashMap<_, _>>()),
+        match self {
+            Value::Record(name, mut fields) => {
+                match name {
+                    Some(ref name) => {
+                        if name != schema_name.as_ref(){
+                            return Err(Details::GetRecordName { schema_name: schema_name.as_ref().clone(),
+                                value_name: name.clone() }.into())
+                        }
+                    },
+                    None => {}
+                };
+
+                let new_fields = resolved_fields
+                    .iter()
+                    .map(|field| {
+                        let record_field = field.get_record_field();
+                        let value = match fields.remove(&record_field.name) {
+                            Some(value) => value,
+                            None => match record_field.default {
+                                Some(ref value) => Value::from(value.clone()),
+                                None => {
+                                    return Err(Details::GetField(field.get_record_field().name.clone()).into());
+                                }
+                            },
+                        };
+
+                        value
+                        .coerce_internal(field.resolve_field())
+                        .map(|value| (record_field.name.clone(), value))
+                    })
+                    .collect::<Result<HashMap<_,_>, _>>()?;
+
+                if !fields.is_empty() {
+                    return Err(Details::MoreRecordFields(fields.into_keys().collect()).into());
+                }
+
+                Ok(CompleteValue::Record(schema_name, new_fields))
+            },
             other => Err(Error::new(Details::GetRecord {
                 expected: resolved_fields
                     .iter()
@@ -1113,28 +1222,7 @@ impl Value {
                     .collect(),
                 other,
             })),
-        }?;
-
-        let new_fields = resolved_fields
-            .iter()
-            .map(|field| {
-                let record_field = field.get_record_field();
-                let value = match items.remove(&record_field.name) {
-                    Some(value) => value,
-                    None => match record_field.default {
-                        Some(ref value) => Value::from(value.clone()),
-                        None => {
-                            return Err(Details::GetField(field.get_record_field().name.clone()).into());
-                        }
-                    },
-                };
-                value
-                    .resolve_internal(field.resolve_field())
-                    .map(|value| (field.get_record_field().name.clone(), value))
-            })
-            .collect::<Result<Vec<_>, _>>()?;
-
-        Ok(Value::Record(new_fields))
+        }
     }
 
     fn try_u8(self) -> AvroResult<u8> {
