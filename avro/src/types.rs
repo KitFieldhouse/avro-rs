@@ -642,8 +642,20 @@ impl Value {
     /// Resolve this value (self) with provided resolved schema.
     /// This resolution techinically follows a superset of the the schema resolution
     /// rules defined by the specification. TODO: documentation
-    pub fn resolve_schemata(self, resolved: ResolvedSchema) -> AvroResult<Self> {
+    pub fn resolve_complete(self, resolved: ResolvedSchema) -> AvroResult<Self> {
         self.resolve_internal(ResolvedNode::new(&resolved))
+    }
+
+    /// Resolves value against the provided schema.
+    /// This resolution follows a superset of the schema resolution rules defined by the
+    /// specification. TODO: link to docs
+    /// Provided Schema is first cloned then transformed into a ResolvedSchema, which is
+    /// slow and may fail. If succesfull, this function simply calls resolve_complete
+    /// with this new ResolvedSchema.
+    /// Prefer using resolve_complete on a given ResolvedSchema,
+    /// this function exists for convenience and to maintain backwards compatibility.
+    pub fn resolve(self, schema: &Schema)->AvroResult<Self>{
+       self.resolve_complete(schema.clone().try_into()?)
     }
 
     pub(crate) fn resolve_internal(
@@ -1308,7 +1320,7 @@ mod tests {
             (
                 Value::Fixed(12, vec![0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]),
                 Schema::Duration(FixedSchema {
-                    name: Name::from("TestName"),
+                    name: Name::from("TestName").into(),
                     aliases: None,
                     doc: None,
                     size: 12,
@@ -1321,7 +1333,7 @@ mod tests {
             (
                 Value::Fixed(11, vec![0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10]),
                 Schema::Duration(FixedSchema {
-                    name: Name::from("TestName"),
+                    name: Name::from("TestName").into(),
                     aliases: None,
                     doc: None,
                     size: 12,
