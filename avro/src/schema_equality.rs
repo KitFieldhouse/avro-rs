@@ -273,7 +273,7 @@ mod tests {
     #[test]
     fn avro_rs_382_compare_schemata_duration_equal() {
         let schema_one = Schema::Duration(FixedSchema {
-            name: Name::from("name1"),
+            name: Name::from("name1").into(),
             size: 12,
             aliases: None,
             doc: None,
@@ -281,7 +281,7 @@ mod tests {
             attributes: BTreeMap::new(),
         });
         let schema_two = Schema::Duration(FixedSchema {
-            name: Name::from("name1"),
+            name: Name::from("name1").into(),
             size: 12,
             aliases: None,
             doc: None,
@@ -296,7 +296,7 @@ mod tests {
     #[test]
     fn avro_rs_382_compare_schemata_duration_different_names() {
         let schema_one = Schema::Duration(FixedSchema {
-            name: Name::from("name1"),
+            name: Name::from("name1").into(),
             size: 12,
             aliases: None,
             doc: None,
@@ -304,7 +304,7 @@ mod tests {
             attributes: BTreeMap::new(),
         });
         let schema_two = Schema::Duration(FixedSchema {
-            name: Name::from("name2"),
+            name: Name::from("name2").into(),
             size: 12,
             aliases: None,
             doc: None,
@@ -321,7 +321,7 @@ mod tests {
     #[test]
     fn avro_rs_382_compare_schemata_duration_different_attributes() {
         let schema_one = Schema::Duration(FixedSchema {
-            name: Name::from("name1"),
+            name: Name::from("name1").into(),
             size: 12,
             aliases: None,
             doc: None,
@@ -331,7 +331,7 @@ mod tests {
                 .collect(),
         });
         let schema_two = Schema::Duration(FixedSchema {
-            name: Name::from("name1"),
+            name: Name::from("name1").into(),
             size: 12,
             aliases: None,
             doc: None,
@@ -352,7 +352,7 @@ mod tests {
     #[test]
     fn avro_rs_382_compare_schemata_duration_different_sizes() {
         let schema_one = Schema::Duration(FixedSchema {
-            name: Name::from("name1"),
+            name: Name::from("name1").into(),
             size: 8,
             aliases: None,
             doc: None,
@@ -360,7 +360,7 @@ mod tests {
             attributes: BTreeMap::new(),
         });
         let schema_two = Schema::Duration(FixedSchema {
-            name: Name::from("name1"),
+            name: Name::from("name1").into(),
             size: 12,
             aliases: None,
             doc: None,
@@ -671,7 +671,7 @@ mod tests {
             name: Name {
                 name: "some_name".to_string(),
                 namespace: None,
-            },
+            }.into(),
             aliases: None,
             doc: None,
             size: 16,
