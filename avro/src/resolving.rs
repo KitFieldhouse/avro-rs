@@ -19,7 +19,7 @@
 
 use serde::Serialize;
 
-use crate::schema::{self, derive, ArraySchema, DecimalSchema, EnumSchema, FixedSchema, LeafSchema, MapSchema, Name, RecordField, RecordSchema, Schema, SchemaWithSymbols, UnionSchema};
+use crate::schema::{self, derive, ArraySchema, DecimalSchema, EnumSchema, FixedSchema, LeafSchema, MapSchema, Name, RecordField, RecordSchema, Schema, SchemaWithSymbols, UnionSchema, UuidSchema};
 use crate::AvroResult;
 use crate::error::{Details,Error};
 use std::{collections::{HashMap, HashSet}, sync::Arc, iter::once};
