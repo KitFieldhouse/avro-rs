@@ -6562,7 +6562,7 @@ mod tests {
         assert_eq!(
             parse_result,
             Schema::Uuid(UuidSchema::Fixed(FixedSchema {
-                name: Name::new("FixedUUID")?,
+                name: Name::new("FixedUUID")?.into(),
                 aliases: None,
                 doc: None,
                 size: 16,
@@ -7193,8 +7193,7 @@ mod tests {
             ]
         }"#,
         )?;
-        let _resolved = ResolvedSchema::try_from(&schema)?;
-        let _resolved_owned = ResolvedOwnedSchema::try_from(schema)?;
+        let _resolved = ResolvedSchema::try_from(&schema.into())?;
 
         Ok(())
     }
@@ -7224,8 +7223,7 @@ mod tests {
             ]
         }"#,
         )?;
-        let _resolved = ResolvedSchema::try_from(&schema)?;
-        let _resolved_owned = ResolvedOwnedSchema::try_from(schema)?;
+        let _resolved = ResolvedSchema::try_from(&schema.into())?;
 
         Ok(())
     }
@@ -7233,7 +7231,7 @@ mod tests {
     #[test]
     fn avro_rs_382_serialize_duration_schema() -> TestResult {
         let schema = Schema::Duration(FixedSchema {
-            name: Name::from("Duration"),
+            name: Name::from("Duration").into(),
             aliases: None,
             doc: None,
             size: 12,
