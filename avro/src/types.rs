@@ -692,7 +692,7 @@ impl Value {
                 scale,
                 precision,
                 inner,
-            }) => self.resolve_decimal(precision, scale, inner),
+            }) => self.resolve_decimal(*precision, *scale, inner),
             ResolvedNode::Union(resolved_union) => {
                 self.resolve_union(resolved_union)
             }
