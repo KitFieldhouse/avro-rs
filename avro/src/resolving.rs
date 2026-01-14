@@ -253,7 +253,7 @@ pub enum ResolvedNode<'a>{
     LocalTimestampMillis(&'a Schema),
     LocalTimestampMicros(&'a Schema),
     LocalTimestampNanos(&'a Schema),
-    Duration(&'a Schema),
+    Duration(&'a Schema, &'a FixedSchema),
     Enum(&'a Schema, &'a EnumSchema),
     Fixed(&'a Schema, &'a FixedSchema),
     Decimal(&'a Schema, &'a DecimalSchema),
@@ -298,7 +298,7 @@ impl<'a> ResolvedNode<'a> {
         Schema::LocalTimestampMillis => ResolvedNode::LocalTimestampMillis(schema),
         Schema::LocalTimestampMicros => ResolvedNode::LocalTimestampMicros(schema),
         Schema::LocalTimestampNanos => ResolvedNode::LocalTimestampNanos(schema),
-        Schema::Duration => ResolvedNode::Duration(schema),
+        Schema::Duration(fixed_schema) => ResolvedNode::Duration(schema, fixed_schema),
         Schema::Enum(enum_schema) => ResolvedNode::Enum(schema, enum_schema),
         Schema::Fixed(fixed_schema) => ResolvedNode::Fixed(schema, fixed_schema),
         Schema::Decimal(decimal_schema) => ResolvedNode::Decimal(schema, decimal_schema)
@@ -330,7 +330,7 @@ impl<'a> ResolvedNode<'a> {
            Self::LocalTimestampMillis(schema) => schema,
            Self::LocalTimestampMicros(schema) => schema,
            Self::LocalTimestampNanos(schema) => schema,
-           Self::Duration(schema) => schema,
+           Self::Duration(schema, _) => schema,
            Self::Enum(schema, _) => schema,
            Self::Fixed(schema, _) => schema,
            Self::Decimal(schema, _) => schema
