@@ -1652,7 +1652,7 @@ mod tests {
             precision: 20,
             scale: 0,
             inner: InnerDecimalSchema::Fixed(FixedSchema {
-                name: Name::new("DecimalFixed")?,
+                name: Name::new("DecimalFixed")?.into(),
                 aliases: None,
                 doc: None,
                 size: 20,
