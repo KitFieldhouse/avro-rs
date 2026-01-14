@@ -809,7 +809,7 @@ mod tests {
     #[test]
     fn test_compatible_reader_writer_pairs() {
         let uuid_fixed = FixedSchema {
-            name: Name::new("uuid_fixed").unwrap(),
+            name: Name::new("uuid_fixed").unwrap().into(),
             aliases: None,
             doc: None,
             size: 16,
