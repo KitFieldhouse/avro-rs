@@ -502,13 +502,13 @@ impl Serialize for ResolvedSchema{
 
 impl PartialEq for ResolvedSchema{
     fn eq(&self, other: &Self) -> bool {
-        compare_schema_with_context(&self.schema, &other.schema, &self.context_definitions, &other.context_definitions, &HashSet::new(), &HashSet::new(), false)
+        compare_schema_with_context(&self.schema, &other.schema, &self.context_definitions, &other.context_definitions, &HashSet::new(), &HashSet::new())
     }
 }
 
 impl PartialEq for SchemaWithSymbols{
     fn eq(&self, other: &Self) -> bool {
-        compare_schema_with_context(&self.schema, &other.schema, &self.defined_names, &other.defined_names, &self.referenced_names, &other.referenced_names, false)
+        compare_schema_with_context(&self.schema, &other.schema, &self.defined_names, &other.defined_names, &self.referenced_names, &other.referenced_names)
     }
 }
 
@@ -549,7 +549,7 @@ impl DefaultResolver{
     }
 }
 
-fn compare_schema_with_context(schema_one: &Schema, schema_two: &Schema, context_one: &NameMap, context_two: &NameMap, dangling_one: &NameSet, dangling_two: &NameSet, include_attributes: bool) -> bool{
+fn compare_schema_with_context(schema_one: &Schema, schema_two: &Schema, context_one: &NameMap, context_two: &NameMap, dangling_one: &NameSet, dangling_two: &NameSet) -> bool{
     if dangling_one != dangling_two{
         return false;
     }
@@ -565,136 +565,12 @@ fn compare_schema_with_context(schema_one: &Schema, schema_two: &Schema, context
     // we now know that the two contexts claim to define the same set of names, lets verify
 
     if context_one.iter().fold(true, |acc, (name, schema)|{acc &&
-        compare_inner(schema.as_ref(), context_two.get(name).unwrap().as_ref(), include_attributes)}) {
+        schema.as_ref() == context_two.get(name).unwrap().as_ref()}) {
         return false
     }
 
-    compare_inner(schema_one, schema_two, include_attributes)
+    schema_one == schema_two
 
-}
-
-fn compare_inner(schema_one: &Schema, schema_two: &Schema, include_attributes: bool) -> bool {
-
-    if schema_one.name() != schema_two.name() {
-        return false;
-    }
-
-    if  include_attributes
-        && schema_one.custom_attributes() != schema_two.custom_attributes()
-    {
-        return false;
-    }
-
-    match (schema_one, schema_two) {
-        (Schema::Null, Schema::Null) => true,
-        (Schema::Null, _) => false,
-        (Schema::Boolean, Schema::Boolean) => true,
-        (Schema::Boolean, _) => false,
-        (Schema::Int, Schema::Int) => true,
-        (Schema::Int, _) => false,
-        (Schema::Long, Schema::Long) => true,
-        (Schema::Long, _) => false,
-        (Schema::Float, Schema::Float) => true,
-        (Schema::Float, _) => false,
-        (Schema::Double, Schema::Double) => true,
-        (Schema::Double, _) => false,
-        (Schema::Bytes, Schema::Bytes) => true,
-        (Schema::Bytes, _) => false,
-        (Schema::String, Schema::String) => true,
-        (Schema::String, _) => false,
-        (Schema::Uuid, Schema::Uuid) => true,
-        (Schema::Uuid, _) => false,
-        (Schema::BigDecimal, Schema::BigDecimal) => true,
-        (Schema::BigDecimal, _) => false,
-        (Schema::Date, Schema::Date) => true,
-        (Schema::Date, _) => false,
-        (Schema::Duration, Schema::Duration) => true,
-        (Schema::Duration, _) => false,
-        (Schema::TimeMicros, Schema::TimeMicros) => true,
-        (Schema::TimeMicros, _) => false,
-        (Schema::TimeMillis, Schema::TimeMillis) => true,
-        (Schema::TimeMillis, _) => false,
-        (Schema::TimestampMicros, Schema::TimestampMicros) => true,
-        (Schema::TimestampMicros, _) => false,
-        (Schema::TimestampMillis, Schema::TimestampMillis) => true,
-        (Schema::TimestampMillis, _) => false,
-        (Schema::TimestampNanos, Schema::TimestampNanos) => true,
-        (Schema::TimestampNanos, _) => false,
-        (Schema::LocalTimestampMicros, Schema::LocalTimestampMicros) => true,
-        (Schema::LocalTimestampMicros, _) => false,
-        (Schema::LocalTimestampMillis, Schema::LocalTimestampMillis) => true,
-        (Schema::LocalTimestampMillis, _) => false,
-        (Schema::LocalTimestampNanos, Schema::LocalTimestampNanos) => true,
-        (Schema::LocalTimestampNanos, _) => false,
-        (
-            Schema::Record(RecordSchema { fields: fields_one, ..}),
-            Schema::Record(RecordSchema { fields: fields_two, ..})
-        ) => {
-            compare_record_schema_fields(&fields_one, &fields_two, include_attributes)
-        }
-        (Schema::Record(_), _) => false,
-        (
-            Schema::Enum(EnumSchema { symbols: symbols_one, ..}),
-            Schema::Enum(EnumSchema { symbols: symbols_two, .. })
-        ) => {
-            symbols_one == symbols_two
-        }
-        (Schema::Enum(_), _) => false,
-        (
-            Schema::Fixed(FixedSchema { size: size_one, ..}),
-            Schema::Fixed(FixedSchema { size: size_two, .. })
-        ) => {
-            size_one == size_two
-        }
-        (Schema::Fixed(_), _) => false,
-        (
-            Schema::Union(UnionSchema { schemas: schemas_one, ..}),
-            Schema::Union(UnionSchema { schemas: schemas_two, .. })
-        ) => {
-            schemas_one.len() == schemas_two.len()
-                && schemas_one
-                .iter()
-                .zip(schemas_two.iter())
-                .all(|(s1, s2)| compare_inner(s1, s2, include_attributes))
-        }
-        (Schema::Union(_), _) => false,
-        (
-            Schema::Decimal(DecimalSchema { precision: precision_one, scale: scale_one, inner: inner_one }),
-            Schema::Decimal(DecimalSchema { precision: precision_two, scale: scale_two, inner: inner_two })
-        ) => {
-            precision_one == precision_two && scale_one == scale_two && compare_inner(inner_one, inner_two,include_attributes)
-        }
-        (Schema::Decimal(_), _) => false,
-        (
-            Schema::Array(ArraySchema { items: items_one, ..}),
-            Schema::Array(ArraySchema { items: items_two, ..})
-        ) => {
-            compare_inner(items_one, items_two, include_attributes)
-        }
-        (Schema::Array(_), _) => false,
-        (
-            Schema::Map(MapSchema { types: types_one, ..}),
-            Schema::Map(MapSchema { types: types_two, ..})
-        ) => {
-            compare_inner(types_one, types_two, include_attributes)
-        }
-        (Schema::Map(_), _) => false,
-        (
-            Schema::Ref { name: name_one },
-            Schema::Ref { name: name_two }
-        ) => {
-            name_one == name_two
-        }
-        (Schema::Ref { .. }, _) => false,
-    }
-}
-
-fn compare_record_schema_fields(fields_one: &[RecordField], fields_two: &[RecordField], include_attributes: bool) -> bool{
-    fields_one.len() == fields_two.len()
-        && fields_one
-            .iter()
-            .zip(fields_two.iter())
-            .all(|(f1, f2)| f1.name == f2.name && compare_inner(&f1.schema, &f2.schema, include_attributes))
 }
 
 // TODO: need to fill out tests! Doh!
