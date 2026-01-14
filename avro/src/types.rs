@@ -687,7 +687,7 @@ impl Value {
             ResolvedNode::LocalTimestampMicros(_) => self.resolve_local_timestamp_micros(),
             ResolvedNode::LocalTimestampNanos(_) => self.resolve_local_timestamp_nanos(),
             ResolvedNode::Duration(_) => self.resolve_duration(),
-            ResolvedNode::Uuid(_) => self.resolve_uuid(),
+            ResolvedNode::Uuid(_, uuid_schema) => self.resolve_uuid(uuid_schema),
             ResolvedNode::Decimal(_, DecimalSchema {
                 scale,
                 precision,
