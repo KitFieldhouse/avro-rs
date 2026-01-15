@@ -18,10 +18,12 @@
 // Items used for handling and/or providing named schema resolution.
 
 use serde::Serialize;
+use serde_json::Value;
 
-use crate::schema::{self, derive, ArraySchema, DecimalSchema, EnumSchema, FixedSchema, LeafSchema, MapSchema, Name, RecordField, RecordSchema, Schema, SchemaWithSymbols, UnionSchema, UuidSchema};
+use crate::schema::{self, derive, Aliases, ArraySchema, DecimalSchema, Documentation, EnumSchema, FixedSchema, LeafSchema, MapSchema, Name, RecordField, RecordFieldOrder, RecordSchema, Schema, SchemaKind, SchemaWithSymbols, UnionSchema, UuidSchema};
 use crate::AvroResult;
 use crate::error::{Details,Error};
+use std::collections::BTreeMap;
 use std::{collections::{HashMap, HashSet}, sync::Arc, iter::once};
 
 /// contians a schema with all of the schema
@@ -200,63 +202,77 @@ impl ResolvedSchema{
 
 #[derive(Clone, Debug)]
 pub struct ResolvedArray<'a>{
-    schema: &'a Schema,
-    array_schema: &'a ArraySchema,
+    pub attributes: &'a BTreeMap<String, Value>,
+    items: &'a Schema,
     root: &'a ResolvedSchema
 }
 
 #[derive(Clone, Debug)]
 pub struct ResolvedMap<'a>{
-    schema: &'a Schema,
-    map_schema: &'a MapSchema,
+    pub attributes: &'a BTreeMap<String, Value>,
+    types: &'a Schema,
     root: &'a ResolvedSchema
 }
 
 #[derive(Clone, Debug)]
 pub struct ResolvedUnion<'a>{
-    schema: &'a Schema,
-    union_schema: &'a UnionSchema,
+    pub variant_index: &'a BTreeMap<SchemaKind, usize>,
+    schemas: &'a Vec<Schema>,
     root: &'a ResolvedSchema
 }
 
 #[derive(Clone,Debug)]
 pub struct ResolvedRecord<'a>{
-    schema: &'a Schema,
-    record_schema: &'a RecordSchema,
+    pub name: &'a Arc<Name>,
+    pub aliases: &'a Aliases,
+    pub doc: &'a Documentation,
+    pub lookup: &'a BTreeMap<String, usize>,
+    pub attributes: &'a BTreeMap<String, Value>,
+    pub fields: Vec<ResolvedRecordField<'a>>,
+
     root: &'a ResolvedSchema
 }
 
 #[derive(Clone,Debug)]
 pub struct ResolvedRecordField<'a>{
-    field: &'a RecordField,
+    pub name: &'a String,
+    pub doc: &'a Documentation,
+    pub aliases: &'a Option<Vec<String>>,
+    pub default: &'a Option<Value>,
+    pub order: &'a RecordFieldOrder,
+    pub position: &'a usize,
+    pub custom_attributes: &'a BTreeMap<String, Value>,
+
+    record_field: &'a RecordField,
+    schema: &'a Schema,
     root: &'a ResolvedSchema
 }
 
 #[derive(Clone,Debug)]
 pub enum ResolvedNode<'a>{
-    Null(&'a Schema),
-    Boolean(&'a Schema),
-    Int(&'a Schema),
-    Long(&'a Schema),
-    Float(&'a Schema),
-    Double(&'a Schema),
-    Bytes(&'a Schema),
-    String(&'a Schema),
-    BigDecimal(&'a Schema),
-    Uuid(&'a Schema, &'a UuidSchema),
-    Date(&'a Schema),
-    TimeMillis(&'a Schema),
-    TimeMicros(&'a Schema),
-    TimestampMillis(&'a Schema),
-    TimestampMicros(&'a Schema),
-    TimestampNanos(&'a Schema),
-    LocalTimestampMillis(&'a Schema),
-    LocalTimestampMicros(&'a Schema),
-    LocalTimestampNanos(&'a Schema),
-    Duration(&'a Schema, &'a FixedSchema),
-    Enum(&'a Schema, &'a EnumSchema),
-    Fixed(&'a Schema, &'a FixedSchema),
-    Decimal(&'a Schema, &'a DecimalSchema),
+    Null,
+    Boolean,
+    Int,
+    Long,
+    Float,
+    Double,
+    Bytes,
+    String,
+    BigDecimal,
+    Date,
+    TimeMillis,
+    TimeMicros,
+    TimestampMillis,
+    TimestampMicros,
+    TimestampNanos,
+    LocalTimestampMillis,
+    LocalTimestampMicros,
+    LocalTimestampNanos,
+    Uuid(&'a UuidSchema),
+    Duration(&'a FixedSchema),
+    Enum(&'a EnumSchema),
+    Fixed(&'a FixedSchema),
+    Decimal(&'a DecimalSchema),
     Array(ResolvedArray<'a>),
     Map(ResolvedMap<'a>),
     Union(ResolvedUnion<'a>),
@@ -274,140 +290,107 @@ impl<'a> ResolvedNode<'a> {
 
    fn from_schema(schema: &'a Schema, root: &'a ResolvedSchema) -> ResolvedNode<'a>{
        match schema {
-        Schema::Map(map_schema) => ResolvedNode::Map(ResolvedMap{schema, map_schema, root}),
-        Schema::Union(union_schema) => ResolvedNode::Union(ResolvedUnion{schema, union_schema, root}),
-        Schema::Array(array_schema) => ResolvedNode::Array(ResolvedArray{schema, array_schema, root}),
-        Schema::Record(record_schema) => ResolvedNode::Record(ResolvedRecord{schema, record_schema, root}),
+        Schema::Map(MapSchema{attributes, types}) => ResolvedNode::Map(ResolvedMap{attributes, types, root}),
+        Schema::Union(UnionSchema { schemas, variant_index}) => ResolvedNode::Union(ResolvedUnion{schemas, variant_index, root}),
+        Schema::Array(ArraySchema { items, attributes }) => ResolvedNode::Array(ResolvedArray{items, attributes, root}),
+        Schema::Record(RecordSchema { name, aliases, doc, fields, lookup, attributes }) => {
+            let fields = fields.iter()
+                .map(|field|{
+                    let RecordField {name, doc, aliases, default, schema, order, position, custom_attributes} = field;
+                    ResolvedRecordField{name, doc, aliases, default, schema, order, position, custom_attributes, record_field: field, root}
+                }).collect();
+            ResolvedNode::Record(ResolvedRecord{ name, aliases, doc, fields, lookup, attributes, root})
+        },
         Schema::Ref{name} => Self::from_schema(root.get_context_definitions().get(name).unwrap(), root),
-        Schema::Null => ResolvedNode::Null(schema),
-        Schema::Boolean => ResolvedNode::Boolean(schema),
-        Schema::Int => ResolvedNode::Int(schema),
-        Schema::Long => ResolvedNode::Long(schema),
-        Schema::Float => ResolvedNode::Float(schema),
-        Schema::Double => ResolvedNode::Double(schema),
-        Schema::Bytes => ResolvedNode::Bytes(schema),
-        Schema::String => ResolvedNode::String(schema),
-        Schema::BigDecimal => ResolvedNode::BigDecimal(schema),
-        Schema::Uuid(uuid_schema) => ResolvedNode::Uuid(schema, uuid_schema),
-        Schema::Date => ResolvedNode::Date(schema),
-        Schema::TimeMillis => ResolvedNode::TimeMillis(schema),
-        Schema::TimeMicros => ResolvedNode::TimeMicros(schema),
-        Schema::TimestampMillis => ResolvedNode::TimestampMillis(schema),
-        Schema::TimestampMicros => ResolvedNode::TimestampMicros(schema),
-        Schema::TimestampNanos => ResolvedNode::TimestampNanos(schema),
-        Schema::LocalTimestampMillis => ResolvedNode::LocalTimestampMillis(schema),
-        Schema::LocalTimestampMicros => ResolvedNode::LocalTimestampMicros(schema),
-        Schema::LocalTimestampNanos => ResolvedNode::LocalTimestampNanos(schema),
-        Schema::Duration(fixed_schema) => ResolvedNode::Duration(schema, fixed_schema),
-        Schema::Enum(enum_schema) => ResolvedNode::Enum(schema, enum_schema),
-        Schema::Fixed(fixed_schema) => ResolvedNode::Fixed(schema, fixed_schema),
-        Schema::Decimal(decimal_schema) => ResolvedNode::Decimal(schema, decimal_schema)
-       }
-   }
-
-   pub fn get_schema(&self)-> &Schema{
-       match *self {
-           Self::Array(ref resolved_array) => resolved_array.schema,
-           Self::Union(ref resolved_union) => resolved_union.schema,
-           Self::Record(ref resolved_record) => resolved_record.schema,
-           Self::Map(ref resolved_map) => resolved_map.schema,
-           Self::Null(schema) => schema,
-           Self::Boolean(schema) => schema,
-           Self::Int(schema) => schema,
-           Self::Long(schema) => schema,
-           Self::Float(schema) => schema,
-           Self::Double(schema) => schema,
-           Self::Bytes(schema) => schema,
-           Self::String(schema) => schema,
-           Self::BigDecimal(schema) => schema,
-           Self::Uuid(schema,_) => schema,
-           Self::Date(schema) => schema,
-           Self::TimeMillis(schema) => schema,
-           Self::TimeMicros(schema) => schema,
-           Self::TimestampMillis(schema) => schema,
-           Self::TimestampMicros(schema) => schema,
-           Self::TimestampNanos(schema) => schema,
-           Self::LocalTimestampMillis(schema) => schema,
-           Self::LocalTimestampMicros(schema) => schema,
-           Self::LocalTimestampNanos(schema) => schema,
-           Self::Duration(schema, _) => schema,
-           Self::Enum(schema, _) => schema,
-           Self::Fixed(schema, _) => schema,
-           Self::Decimal(schema, _) => schema
+        Schema::Null => ResolvedNode::Null,
+        Schema::Boolean => ResolvedNode::Boolean,
+        Schema::Int => ResolvedNode::Int,
+        Schema::Long => ResolvedNode::Long,
+        Schema::Float => ResolvedNode::Float,
+        Schema::Double => ResolvedNode::Double,
+        Schema::Bytes => ResolvedNode::Bytes,
+        Schema::String => ResolvedNode::String,
+        Schema::BigDecimal => ResolvedNode::BigDecimal,
+        Schema::Uuid(uuid_schema) => ResolvedNode::Uuid(uuid_schema),
+        Schema::Date => ResolvedNode::Date,
+        Schema::TimeMillis => ResolvedNode::TimeMillis,
+        Schema::TimeMicros => ResolvedNode::TimeMicros,
+        Schema::TimestampMillis => ResolvedNode::TimestampMillis,
+        Schema::TimestampMicros => ResolvedNode::TimestampMicros,
+        Schema::TimestampNanos => ResolvedNode::TimestampNanos,
+        Schema::LocalTimestampMillis => ResolvedNode::LocalTimestampMillis,
+        Schema::LocalTimestampMicros => ResolvedNode::LocalTimestampMicros,
+        Schema::LocalTimestampNanos => ResolvedNode::LocalTimestampNanos,
+        Schema::Duration(fixed_schema) => ResolvedNode::Duration(fixed_schema),
+        Schema::Enum(enum_schema) => ResolvedNode::Enum(enum_schema),
+        Schema::Fixed(fixed_schema) => ResolvedNode::Fixed(fixed_schema),
+        Schema::Decimal(decimal_schema) => ResolvedNode::Decimal(decimal_schema)
        }
    }
 }
 
+impl From<&ResolvedNode<'_>> for SchemaKind {
+    fn from(value: &ResolvedNode) -> Self {
+        match value {
+            ResolvedNode::Null => Self::Null,
+            ResolvedNode::Boolean => Self::Boolean,
+            ResolvedNode::Int => Self::Int,
+            ResolvedNode::Long => Self::Long,
+            ResolvedNode::Float => Self::Float,
+            ResolvedNode::Double => Self::Double,
+            ResolvedNode::Bytes => Self::Bytes,
+            ResolvedNode::String => Self::String,
+            ResolvedNode::Array(_) => Self::Array,
+            ResolvedNode::Map(_) => Self::Map,
+            ResolvedNode::Union(_) => Self::Union,
+            ResolvedNode::Record(_) => Self::Record,
+            ResolvedNode::Enum(_) => Self::Enum,
+            ResolvedNode::Fixed(_) => Self::Fixed,
+            ResolvedNode::Decimal { .. } => Self::Decimal,
+            ResolvedNode::BigDecimal => Self::BigDecimal,
+            ResolvedNode::Uuid(_) => Self::Uuid,
+            ResolvedNode::Date => Self::Date,
+            ResolvedNode::TimeMillis => Self::TimeMillis,
+            ResolvedNode::TimeMicros => Self::TimeMicros,
+            ResolvedNode::TimestampMillis => Self::TimestampMillis,
+            ResolvedNode::TimestampMicros => Self::TimestampMicros,
+            ResolvedNode::TimestampNanos => Self::TimestampNanos,
+            ResolvedNode::LocalTimestampMillis => Self::LocalTimestampMillis,
+            ResolvedNode::LocalTimestampMicros => Self::LocalTimestampMicros,
+            ResolvedNode::LocalTimestampNanos => Self::LocalTimestampNanos,
+            ResolvedNode::Duration { .. } => Self::Duration,
+        }
+    }
+}
+
 impl<'a> ResolvedMap<'a>{
     pub fn resolve_types(&self)->ResolvedNode{
-       ResolvedNode::from_schema(&self.map_schema.types, self.root)
-    }
-
-    pub fn get_map_schema(&self) -> &'a MapSchema{
-        self.map_schema
-    }
-
-    pub fn get_schema(&self) -> &'a Schema{
-        self.schema
+       ResolvedNode::from_schema(&self.types, self.root)
     }
 }
 
 impl<'a> ResolvedUnion<'a>{
     pub fn resolve_schemas(&self)->Vec<ResolvedNode>{
-        self.union_schema.schemas.iter().map(|schema|{
+        self.schemas.iter().map(|schema|{
             ResolvedNode::from_schema(schema, self.root)
         }).collect()
-    }
-
-    pub fn get_union_schema(&self) -> &'a UnionSchema{
-        self.union_schema
-    }
-
-    pub fn get_schema(&self) -> &'a Schema{
-        self.schema
     }
 }
 
 impl<'a> ResolvedArray<'a>{
     pub fn resolve_items(&self)->ResolvedNode{
-        ResolvedNode::from_schema(&self.array_schema.items, self.root)
-    }
-
-    pub fn get_array_schema(&self) -> &'a ArraySchema{
-        self.array_schema
-    }
-
-    pub fn get_schema(&self) -> &'a Schema{
-        self.schema
-    }
-}
-
-impl<'a> ResolvedRecord<'a>{
-    pub fn resolve_fields(&self)->Vec<ResolvedRecordField>{
-        self.record_schema.fields.iter().map(|field|{
-            ResolvedRecordField{
-                field,
-                root: self.root
-            }
-        }).collect()
-    }
-
-    pub fn get_record_schema(&self) -> &'a RecordSchema{
-        self.record_schema
-    }
-
-    pub fn get_schema(&self) -> &'a Schema{
-        self.schema
+        ResolvedNode::from_schema(&self.items, self.root)
     }
 }
 
 impl<'a> ResolvedRecordField<'a>{
     pub fn resolve_field(&self)->ResolvedNode{
-        ResolvedNode::from_schema(&self.field.schema, self.root)
+        ResolvedNode::from_schema(&self.schema, self.root)
     }
 
-    pub fn get_record_field(&self) -> &'a RecordField{
-        self.field
+    // delegate to implementation on Schema
+    pub fn is_nullable(&self) -> bool {
+        self.record_field.is_nullable()
     }
 }
 
