@@ -198,41 +198,41 @@ impl ResolvedSchema{
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct ResolvedArray<'a>{
     schema: &'a Schema,
     array_schema: &'a ArraySchema,
     root: &'a ResolvedSchema
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct ResolvedMap<'a>{
     schema: &'a Schema,
     map_schema: &'a MapSchema,
     root: &'a ResolvedSchema
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct ResolvedUnion<'a>{
     schema: &'a Schema,
     union_schema: &'a UnionSchema,
     root: &'a ResolvedSchema
 }
 
-#[derive(Clone)]
+#[derive(Clone,Debug)]
 pub struct ResolvedRecord<'a>{
     schema: &'a Schema,
     record_schema: &'a RecordSchema,
     root: &'a ResolvedSchema
 }
 
-#[derive(Clone)]
+#[derive(Clone,Debug)]
 pub struct ResolvedRecordField<'a>{
     field: &'a RecordField,
     root: &'a ResolvedSchema
 }
 
-#[derive(Clone)]
+#[derive(Clone,Debug)]
 pub enum ResolvedNode<'a>{
     Null(&'a Schema),
     Boolean(&'a Schema),
