@@ -353,34 +353,36 @@ impl TryFrom<Value> for JsonValue {
 
 impl Value {
     /// Validate the value against the given [Schema](../schema/enum.Schema.html).
+    /// This is a convenience method to keep backwards compatibility intact and is slow.
+    /// This method copies the supplied schema and attempts to convert it into ResolvedSchema.
+    /// Prefer using validate_complete if able.
     ///
     /// See the [Avro specification](https://avro.apache.org/docs/current/specification)
     /// for the full set of rules of schema validation.
     pub fn validate(&self, schema: &Schema) -> bool {
-        self.validate_schemata(vec![schema])
+        let resolved_schema : Result<ResolvedSchema,_> = schema.clone().try_into();
+        match resolved_schema{
+           Ok(resolved) => {
+               self.validate_complete(resolved)
+           },
+           Err(error) => {
+               error!("{error:?}");
+               false
+           }
+        }
     }
 
-    pub fn validate_schemata(&self, schemata: Vec<&Schema>) -> bool {
-        let rs = ResolvedSchema::try_from(schemata.clone())
-            .expect("Schemata didn't successfully resolve");
-        let schemata_len = schemata.len();
-        schemata.iter().any(|schema| {
-            let enclosing_namespace = schema.namespace();
-
-            match self.validate_internal(schema, rs.get_names(), &enclosing_namespace) {
-                Some(reason) => {
-                    let log_message =
-                        format!("Invalid value: {self:?} for schema: {schema:?}. Reason: {reason}");
-                    if schemata_len == 1 {
-                        error!("{log_message}");
-                    } else {
-                        debug!("{log_message}");
-                    };
-                    false
-                }
-                None => true,
+    /// Validates this value against the given ResolvedSchema.
+    pub fn validate_complete(&self, schema: ResolvedSchema) -> bool {
+        match self.validate_internal(ResolvedNode::new(&schema)){
+            Some(reason) => {
+                let log_message =
+                    format!("Invalid value: {self:?} for schema: {schema:?}. Reason: {reason}");
+                error!("{log_message}");
+                false
             }
-        })
+            None => true
+        }
     }
 
     fn accumulate(accumulator: Option<String>, other: Option<String>) -> Option<String> {
@@ -393,57 +395,42 @@ impl Value {
     }
 
     /// Validates the value against the provided schema.
-    pub(crate) fn validate_internal<S: std::borrow::Borrow<Schema> + Debug>(
+    pub(crate) fn validate_internal(
         &self,
-        schema: &Schema,
-        names: &HashMap<Name, S>,
-        enclosing_namespace: &Namespace,
+        node: ResolvedNode,
     ) -> Option<String> {
-        match (self, schema) {
-            (_, Schema::Ref { name }) => {
-                let name = name.fully_qualified_name(enclosing_namespace);
-                names.get(&name).map_or_else(
-                    || {
-                        Some(format!(
-                            "Unresolved schema reference: '{:?}'. Parsed names: {:?}",
-                            name,
-                            names.keys()
-                        ))
-                    },
-                    |s| self.validate_internal(s.borrow(), names, &name.namespace),
-                )
-            }
-            (&Value::Null, &Schema::Null) => None,
-            (&Value::Boolean(_), &Schema::Boolean) => None,
-            (&Value::Int(_), &Schema::Int) => None,
-            (&Value::Int(_), &Schema::Date) => None,
-            (&Value::Int(_), &Schema::TimeMillis) => None,
-            (&Value::Int(_), &Schema::Long) => None,
-            (&Value::Long(_), &Schema::Long) => None,
-            (&Value::Long(_), &Schema::TimeMicros) => None,
-            (&Value::Long(_), &Schema::TimestampMillis) => None,
-            (&Value::Long(_), &Schema::TimestampMicros) => None,
-            (&Value::Long(_), &Schema::LocalTimestampMillis) => None,
-            (&Value::Long(_), &Schema::LocalTimestampMicros) => None,
-            (&Value::TimestampMicros(_), &Schema::TimestampMicros) => None,
-            (&Value::TimestampMillis(_), &Schema::TimestampMillis) => None,
-            (&Value::TimestampNanos(_), &Schema::TimestampNanos) => None,
-            (&Value::LocalTimestampMicros(_), &Schema::LocalTimestampMicros) => None,
-            (&Value::LocalTimestampMillis(_), &Schema::LocalTimestampMillis) => None,
-            (&Value::LocalTimestampNanos(_), &Schema::LocalTimestampNanos) => None,
-            (&Value::TimeMicros(_), &Schema::TimeMicros) => None,
-            (&Value::TimeMillis(_), &Schema::TimeMillis) => None,
-            (&Value::Date(_), &Schema::Date) => None,
-            (&Value::Decimal(_), &Schema::Decimal { .. }) => None,
-            (&Value::BigDecimal(_), &Schema::BigDecimal) => None,
-            (&Value::Duration(_), &Schema::Duration(_)) => None,
-            (&Value::Uuid(_), &Schema::Uuid(_)) => None,
-            (&Value::Float(_), &Schema::Float) => None,
-            (&Value::Float(_), &Schema::Double) => None,
-            (&Value::Double(_), &Schema::Double) => None,
-            (&Value::Bytes(_), &Schema::Bytes) => None,
-            (&Value::Bytes(_), &Schema::Decimal { .. }) => None,
-            (Value::Bytes(bytes), &Schema::Uuid(UuidSchema::Bytes)) => {
+        match (self, node) {
+            (&Value::Null, ResolvedNode::Null(_)) => None,
+            (&Value::Boolean(_), ResolvedNode::Boolean(_)) => None,
+            (&Value::Int(_), ResolvedNode::Int(_)) => None,
+            (&Value::Int(_), ResolvedNode::Date(_)) => None,
+            (&Value::Int(_), ResolvedNode::TimeMillis(_)) => None,
+            (&Value::Int(_), ResolvedNode::Long(_)) => None,
+            (&Value::Long(_), ResolvedNode::Long(_)) => None,
+            (&Value::Long(_), ResolvedNode::TimeMicros(_)) => None,
+            (&Value::Long(_), ResolvedNode::TimestampMillis(_)) => None,
+            (&Value::Long(_), ResolvedNode::TimestampMicros(_)) => None,
+            (&Value::Long(_), ResolvedNode::LocalTimestampMillis(_)) => None,
+            (&Value::Long(_), ResolvedNode::LocalTimestampMicros(_)) => None,
+            (&Value::TimestampMicros(_), ResolvedNode::TimestampMicros(_)) => None,
+            (&Value::TimestampMillis(_), ResolvedNode::TimestampMillis(_)) => None,
+            (&Value::TimestampNanos(_), ResolvedNode::TimestampNanos(_)) => None,
+            (&Value::LocalTimestampMicros(_), ResolvedNode::LocalTimestampMicros(_)) => None,
+            (&Value::LocalTimestampMillis(_), ResolvedNode::LocalTimestampMillis(_)) => None,
+            (&Value::LocalTimestampNanos(_), ResolvedNode::LocalTimestampNanos(_)) => None,
+            (&Value::TimeMicros(_), ResolvedNode::TimeMicros(_)) => None,
+            (&Value::TimeMillis(_), ResolvedNode::TimeMillis(_)) => None,
+            (&Value::Date(_), ResolvedNode::Date(_)) => None,
+            (&Value::Decimal(_), ResolvedNode::Decimal { .. }) => None,
+            (&Value::BigDecimal(_), ResolvedNode::BigDecimal(_)) => None,
+            (&Value::Duration(_), ResolvedNode::Duration(..)) => None,
+            (&Value::Uuid(_), ResolvedNode::Uuid(..)) => None,
+            (&Value::Float(_), ResolvedNode::Float(_)) => None,
+            (&Value::Float(_), ResolvedNode::Double(_)) => None,
+            (&Value::Double(_), ResolvedNode::Double(_)) => None,
+            (&Value::Bytes(_), ResolvedNode::Bytes(_)) => None,
+            (&Value::Bytes(_), ResolvedNode::Decimal { .. }) => None,
+            (Value::Bytes(bytes), ResolvedNode::Uuid(_,UuidSchema::Bytes)) => {
                 if bytes.len() != 16 {
                     Some(format!(
                         "The value's size ({}) is not the right length for a bytes UUID (16)",
@@ -453,8 +440,8 @@ impl Value {
                     None
                 }
             }
-            (&Value::String(_), &Schema::String) => None,
-            (Value::String(string), &Schema::Uuid(UuidSchema::String)) => {
+            (&Value::String(_), ResolvedNode::String(_)) => None,
+            (Value::String(string), ResolvedNode::Uuid(_,UuidSchema::String)) => {
                 // Non-hyphenated is 32 characters, hyphenated is longer
                 if string.len() < 32 {
                     Some(format!(
@@ -465,8 +452,8 @@ impl Value {
                     None
                 }
             }
-            (&Value::Fixed(n, _), &Schema::Fixed(FixedSchema { size, .. })) => {
-                if n != size {
+            (&Value::Fixed(n, _), ResolvedNode::Fixed(_, FixedSchema { size, .. })) => {
+                if n != *size {
                     Some(format!(
                         "The value's size ({n}) is different than the schema's size ({size})"
                     ))
@@ -474,8 +461,8 @@ impl Value {
                     None
                 }
             }
-            (Value::Bytes(b), &Schema::Fixed(FixedSchema { size, .. })) => {
-                if b.len() != size {
+            (Value::Bytes(b), ResolvedNode::Fixed(_, FixedSchema { size, .. })) => {
+                if b.len() != *size {
                     Some(format!(
                         "The bytes' length ({}) is different than the schema's size ({})",
                         b.len(),
@@ -485,7 +472,7 @@ impl Value {
                     None
                 }
             }
-            (&Value::Fixed(n, _), &Schema::Duration(_)) => {
+            (&Value::Fixed(n, _), ResolvedNode::Duration(..)) => {
                 if n != 12 {
                     Some(format!(
                         "The value's size ('{n}') must be exactly 12 to be a Duration"
@@ -494,7 +481,7 @@ impl Value {
                     None
                 }
             }
-            (&Value::Fixed(n, _), Schema::Uuid(UuidSchema::Fixed(size, ..))) => {
+            (&Value::Fixed(n, _), ResolvedNode::Uuid(_,UuidSchema::Fixed(size, ..))) => {
                 if size.size != 16 {
                     Some(format!(
                         "The schema's size ('{}') must be exactly 16 to be a Uuid",
@@ -509,8 +496,8 @@ impl Value {
                 }
             }
             // TODO: check precision against n
-            (&Value::Fixed(_n, _), &Schema::Decimal { .. }) => None,
-            (Value::String(s), Schema::Enum(EnumSchema { symbols, .. })) => {
+            (&Value::Fixed(_n, _), ResolvedNode::Decimal { .. }) => None,
+            (Value::String(s), ResolvedNode::Enum(_, EnumSchema { symbols, .. })) => {
                 if !symbols.contains(s) {
                     Some(format!("'{s}' is not a member of the possible symbols"))
                 } else {
@@ -519,7 +506,7 @@ impl Value {
             }
             (
                 &Value::Enum(i, ref s),
-                Schema::Enum(EnumSchema {
+                ResolvedNode::Enum(_, EnumSchema {
                     symbols, default, ..
                 }),
             ) => symbols
@@ -536,40 +523,43 @@ impl Value {
                     None => Some(format!("No symbol at position '{i}'")),
                 }),
             // (&Value::Union(None), &Schema::Union(_)) => None,
-            (&Value::Union(i, ref value), Schema::Union(inner)) => inner
-                .variants()
+            (&Value::Union(i, ref value), ResolvedNode::Union(inner)) => inner
+                .resolve_schemas()
                 .get(i as usize)
-                .map(|schema| value.validate_internal(schema, names, enclosing_namespace))
+                .map(|node| value.validate_internal(node.clone()))
                 .unwrap_or_else(|| Some(format!("No schema in the union at position '{i}'"))),
-            (v, Schema::Union(inner)) => {
+            (v, ResolvedNode::Union(inner)) => {
                 match inner.find_schema_with_known_schemata(v, Some(names), enclosing_namespace) {
                     Some(_) => None,
                     None => Some("Could not find matching type in union".to_string()),
                 }
             }
-            (Value::Array(items), Schema::Array(inner)) => items.iter().fold(None, |acc, item| {
+            (Value::Array(items), ResolvedNode::Array(inner)) => items.iter().fold(None, |acc, item| {
                 Value::accumulate(
                     acc,
-                    item.validate_internal(&inner.items, names, enclosing_namespace),
+                    item.validate_internal(inner.resolve_items()),
                 )
             }),
-            (Value::Map(items), Schema::Map(inner)) => {
+            (Value::Map(items), ResolvedNode::Map(inner)) => {
                 items.iter().fold(None, |acc, (_, value)| {
                     Value::accumulate(
                         acc,
-                        value.validate_internal(&inner.types, names, enclosing_namespace),
+                        value.validate_internal(inner.resolve_types()),
                     )
                 })
             }
             (
                 Value::Record(record_fields),
-                Schema::Record(RecordSchema {
+                ResolvedNode::Record(resolved_record),
+            ) => {
+
+                let RecordSchema {
                     fields,
                     lookup,
                     name,
                     ..
-                }),
-            ) => {
+                } = resolved_record.get_record_schema();
+
                 let non_nullable_fields_count =
                     fields.iter().filter(|&rf| !rf.is_nullable()).count();
 
@@ -588,23 +578,18 @@ impl Value {
                     ));
                 }
 
+                let resolved_fields = resolved_record.resolve_fields();
+
                 record_fields
                     .iter()
                     .fold(None, |acc, (field_name, record_field)| {
-                        let record_namespace = if name.namespace.is_none() {
-                            enclosing_namespace
-                        } else {
-                            &name.namespace
-                        };
                         match lookup.get(field_name) {
                             Some(idx) => {
-                                let field = &fields[*idx];
+                                let resolved_field = resolved_fields.get(*idx).unwrap();
                                 Value::accumulate(
                                     acc,
                                     record_field.validate_internal(
-                                        &field.schema,
-                                        names,
-                                        record_namespace,
+                                        resolved_field.resolve_field()
                                     ),
                                 )
                             }
@@ -615,17 +600,17 @@ impl Value {
                         }
                     })
             }
-            (Value::Map(items), Schema::Record(RecordSchema { fields, .. })) => {
-                fields.iter().fold(None, |acc, field| {
-                    if let Some(item) = items.get(&field.name) {
-                        let res = item.validate_internal(&field.schema, names, enclosing_namespace);
+            (Value::Map(items), ResolvedNode::Record(resolved_record)) => {
+                resolved_record.resolve_fields().iter().fold(None, |acc, field| {
+                    if let Some(item) = items.get(&field.get_record_field().name) {
+                        let res = item.validate_internal(field.resolve_field());
                         Value::accumulate(acc, res)
-                    } else if !field.is_nullable() {
+                    } else if !field.get_record_field().is_nullable() {
                         Value::accumulate(
                             acc,
                             Some(format!(
                                 "Field with name '{:?}' is not a member of the map items",
-                                field.name
+                                field.get_record_field().name
                             )),
                         )
                     } else {
