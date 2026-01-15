@@ -909,7 +909,9 @@ pub struct UnionSchema {
     // schema index given a value.
     // **NOTE** that this approach does not work for named types, and will have to be modified
     // to support that. A simple solution is to also keep a mapping of the names used.
-    variant_index: BTreeMap<SchemaKind, usize>,
+    pub(crate) variant_index: BTreeMap<SchemaKind, usize>, // TODO: making this pub crate is a
+                                                           // stopgap at the moment to make it
+                                                           // visible.
 }
 
 impl UnionSchema {
