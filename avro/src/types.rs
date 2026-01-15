@@ -400,37 +400,37 @@ impl Value {
         node: ResolvedNode,
     ) -> Option<String> {
         match (self, node) {
-            (&Value::Null, ResolvedNode::Null(_)) => None,
-            (&Value::Boolean(_), ResolvedNode::Boolean(_)) => None,
-            (&Value::Int(_), ResolvedNode::Int(_)) => None,
-            (&Value::Int(_), ResolvedNode::Date(_)) => None,
-            (&Value::Int(_), ResolvedNode::TimeMillis(_)) => None,
-            (&Value::Int(_), ResolvedNode::Long(_)) => None,
-            (&Value::Long(_), ResolvedNode::Long(_)) => None,
-            (&Value::Long(_), ResolvedNode::TimeMicros(_)) => None,
-            (&Value::Long(_), ResolvedNode::TimestampMillis(_)) => None,
-            (&Value::Long(_), ResolvedNode::TimestampMicros(_)) => None,
-            (&Value::Long(_), ResolvedNode::LocalTimestampMillis(_)) => None,
-            (&Value::Long(_), ResolvedNode::LocalTimestampMicros(_)) => None,
-            (&Value::TimestampMicros(_), ResolvedNode::TimestampMicros(_)) => None,
-            (&Value::TimestampMillis(_), ResolvedNode::TimestampMillis(_)) => None,
-            (&Value::TimestampNanos(_), ResolvedNode::TimestampNanos(_)) => None,
-            (&Value::LocalTimestampMicros(_), ResolvedNode::LocalTimestampMicros(_)) => None,
-            (&Value::LocalTimestampMillis(_), ResolvedNode::LocalTimestampMillis(_)) => None,
-            (&Value::LocalTimestampNanos(_), ResolvedNode::LocalTimestampNanos(_)) => None,
-            (&Value::TimeMicros(_), ResolvedNode::TimeMicros(_)) => None,
-            (&Value::TimeMillis(_), ResolvedNode::TimeMillis(_)) => None,
-            (&Value::Date(_), ResolvedNode::Date(_)) => None,
+            (&Value::Null, ResolvedNode::Null) => None,
+            (&Value::Boolean(_), ResolvedNode::Boolean) => None,
+            (&Value::Int(_), ResolvedNode::Int) => None,
+            (&Value::Int(_), ResolvedNode::Date) => None,
+            (&Value::Int(_), ResolvedNode::TimeMillis) => None,
+            (&Value::Int(_), ResolvedNode::Long) => None,
+            (&Value::Long(_), ResolvedNode::Long) => None,
+            (&Value::Long(_), ResolvedNode::TimeMicros) => None,
+            (&Value::Long(_), ResolvedNode::TimestampMillis) => None,
+            (&Value::Long(_), ResolvedNode::TimestampMicros) => None,
+            (&Value::Long(_), ResolvedNode::LocalTimestampMillis) => None,
+            (&Value::Long(_), ResolvedNode::LocalTimestampMicros) => None,
+            (&Value::TimestampMicros(_), ResolvedNode::TimestampMicros) => None,
+            (&Value::TimestampMillis(_), ResolvedNode::TimestampMillis) => None,
+            (&Value::TimestampNanos(_), ResolvedNode::TimestampNanos) => None,
+            (&Value::LocalTimestampMicros(_), ResolvedNode::LocalTimestampMicros) => None,
+            (&Value::LocalTimestampMillis(_), ResolvedNode::LocalTimestampMillis) => None,
+            (&Value::LocalTimestampNanos(_), ResolvedNode::LocalTimestampNanos) => None,
+            (&Value::TimeMicros(_), ResolvedNode::TimeMicros) => None,
+            (&Value::TimeMillis(_), ResolvedNode::TimeMillis) => None,
+            (&Value::Date(_), ResolvedNode::Date) => None,
             (&Value::Decimal(_), ResolvedNode::Decimal { .. }) => None,
-            (&Value::BigDecimal(_), ResolvedNode::BigDecimal(_)) => None,
+            (&Value::BigDecimal(_), ResolvedNode::BigDecimal) => None,
             (&Value::Duration(_), ResolvedNode::Duration(..)) => None,
             (&Value::Uuid(_), ResolvedNode::Uuid(..)) => None,
-            (&Value::Float(_), ResolvedNode::Float(_)) => None,
-            (&Value::Float(_), ResolvedNode::Double(_)) => None,
-            (&Value::Double(_), ResolvedNode::Double(_)) => None,
-            (&Value::Bytes(_), ResolvedNode::Bytes(_)) => None,
+            (&Value::Float(_), ResolvedNode::Float) => None,
+            (&Value::Float(_), ResolvedNode::Double) => None,
+            (&Value::Double(_), ResolvedNode::Double) => None,
+            (&Value::Bytes(_), ResolvedNode::Bytes) => None,
             (&Value::Bytes(_), ResolvedNode::Decimal { .. }) => None,
-            (Value::Bytes(bytes), ResolvedNode::Uuid(_,UuidSchema::Bytes)) => {
+            (Value::Bytes(bytes), ResolvedNode::Uuid(UuidSchema::Bytes)) => {
                 if bytes.len() != 16 {
                     Some(format!(
                         "The value's size ({}) is not the right length for a bytes UUID (16)",
@@ -440,8 +440,8 @@ impl Value {
                     None
                 }
             }
-            (&Value::String(_), ResolvedNode::String(_)) => None,
-            (Value::String(string), ResolvedNode::Uuid(_,UuidSchema::String)) => {
+            (&Value::String(_), ResolvedNode::String) => None,
+            (Value::String(string), ResolvedNode::Uuid(UuidSchema::String)) => {
                 // Non-hyphenated is 32 characters, hyphenated is longer
                 if string.len() < 32 {
                     Some(format!(
@@ -452,7 +452,7 @@ impl Value {
                     None
                 }
             }
-            (&Value::Fixed(n, _), ResolvedNode::Fixed(_, FixedSchema { size, .. })) => {
+            (&Value::Fixed(n, _), ResolvedNode::Fixed(FixedSchema { size, .. })) => {
                 if n != *size {
                     Some(format!(
                         "The value's size ({n}) is different than the schema's size ({size})"
@@ -461,7 +461,7 @@ impl Value {
                     None
                 }
             }
-            (Value::Bytes(b), ResolvedNode::Fixed(_, FixedSchema { size, .. })) => {
+            (Value::Bytes(b), ResolvedNode::Fixed(FixedSchema { size, .. })) => {
                 if b.len() != *size {
                     Some(format!(
                         "The bytes' length ({}) is different than the schema's size ({})",
@@ -481,7 +481,7 @@ impl Value {
                     None
                 }
             }
-            (&Value::Fixed(n, _), ResolvedNode::Uuid(_,UuidSchema::Fixed(size, ..))) => {
+            (&Value::Fixed(n, _), ResolvedNode::Uuid(UuidSchema::Fixed(size, ..))) => {
                 if size.size != 16 {
                     Some(format!(
                         "The schema's size ('{}') must be exactly 16 to be a Uuid",
@@ -497,7 +497,7 @@ impl Value {
             }
             // TODO: check precision against n
             (&Value::Fixed(_n, _), ResolvedNode::Decimal { .. }) => None,
-            (Value::String(s), ResolvedNode::Enum(_, EnumSchema { symbols, .. })) => {
+            (Value::String(s), ResolvedNode::Enum(EnumSchema { symbols, .. })) => {
                 if !symbols.contains(s) {
                     Some(format!("'{s}' is not a member of the possible symbols"))
                 } else {
@@ -506,7 +506,7 @@ impl Value {
             }
             (
                 &Value::Enum(i, ref s),
-                ResolvedNode::Enum(_, EnumSchema {
+                ResolvedNode::Enum(EnumSchema {
                     symbols, default, ..
                 }),
             ) => symbols
@@ -550,16 +550,8 @@ impl Value {
             }
             (
                 Value::Record(record_fields),
-                ResolvedNode::Record(resolved_record),
+                ResolvedNode::Record(ResolvedRecord{fields,lookup, name, ..}),
             ) => {
-
-                let RecordSchema {
-                    fields,
-                    lookup,
-                    name,
-                    ..
-                } = resolved_record.get_record_schema();
-
                 let non_nullable_fields_count =
                     fields.iter().filter(|&rf| !rf.is_nullable()).count();
 
@@ -578,14 +570,12 @@ impl Value {
                     ));
                 }
 
-                let resolved_fields = resolved_record.resolve_fields();
-
                 record_fields
                     .iter()
                     .fold(None, |acc, (field_name, record_field)| {
                         match lookup.get(field_name) {
                             Some(idx) => {
-                                let resolved_field = resolved_fields.get(*idx).unwrap();
+                                let resolved_field = fields.get(*idx).unwrap();
                                 Value::accumulate(
                                     acc,
                                     record_field.validate_internal(
@@ -601,16 +591,16 @@ impl Value {
                     })
             }
             (Value::Map(items), ResolvedNode::Record(resolved_record)) => {
-                resolved_record.resolve_fields().iter().fold(None, |acc, field| {
-                    if let Some(item) = items.get(&field.get_record_field().name) {
+                resolved_record.fields.iter().fold(None, |acc, field| {
+                    if let Some(item) = items.get(field.name) {
                         let res = item.validate_internal(field.resolve_field());
                         Value::accumulate(acc, res)
-                    } else if !field.get_record_field().is_nullable() {
+                    } else if !field.is_nullable() {
                         Value::accumulate(
                             acc,
                             Some(format!(
                                 "Field with name '{:?}' is not a member of the map items",
-                                field.get_record_field().name
+                                field.name
                             )),
                         )
                     } else {
@@ -649,7 +639,7 @@ impl Value {
     ) -> AvroResult<Self> {
         // Check if this schema is a union, and if the reader schema is not.
         if SchemaKind::from(&self) == SchemaKind::Union
-            && SchemaKind::from(node.get_schema()) != SchemaKind::Union
+            && SchemaKind::from(&node) != SchemaKind::Union
         {
             // Pull out the Union, and attempt to resolve against it.
             let v = match self {
@@ -659,33 +649,33 @@ impl Value {
             self = v;
         }
         match node {
-            ResolvedNode::Null(_) => self.resolve_null(),
-            ResolvedNode::Boolean(_) => self.resolve_boolean(),
-            ResolvedNode::Int(_) => self.resolve_int(),
-            ResolvedNode::Long(_) => self.resolve_long(),
-            ResolvedNode::Float(_) => self.resolve_float(),
-            ResolvedNode::Double(_) => self.resolve_double(),
-            ResolvedNode::Bytes(_) => self.resolve_bytes(),
-            ResolvedNode::String(_) => self.resolve_string(),
-            ResolvedNode::Fixed(_, FixedSchema { size, .. }) => self.resolve_fixed(*size),
-            ResolvedNode::Enum(_, EnumSchema {
+            ResolvedNode::Null => self.resolve_null(),
+            ResolvedNode::Boolean => self.resolve_boolean(),
+            ResolvedNode::Int => self.resolve_int(),
+            ResolvedNode::Long => self.resolve_long(),
+            ResolvedNode::Float => self.resolve_float(),
+            ResolvedNode::Double => self.resolve_double(),
+            ResolvedNode::Bytes => self.resolve_bytes(),
+            ResolvedNode::String => self.resolve_string(),
+            ResolvedNode::Fixed(FixedSchema { size, .. }) => self.resolve_fixed(*size),
+            ResolvedNode::Enum(EnumSchema {
                 symbols,
                 default,
                 ..
             }) => self.resolve_enum(symbols, default),
-            ResolvedNode::BigDecimal(_) => self.resolve_bigdecimal(),
-            ResolvedNode::Date(_) => self.resolve_date(),
-            ResolvedNode::TimeMillis(_) => self.resolve_time_millis(),
-            ResolvedNode::TimeMicros(_) => self.resolve_time_micros(),
-            ResolvedNode::TimestampMillis(_) => self.resolve_timestamp_millis(),
-            ResolvedNode::TimestampMicros(_) => self.resolve_timestamp_micros(),
-            ResolvedNode::TimestampNanos(_) => self.resolve_timestamp_nanos(),
-            ResolvedNode::LocalTimestampMillis(_) => self.resolve_local_timestamp_millis(),
-            ResolvedNode::LocalTimestampMicros(_) => self.resolve_local_timestamp_micros(),
-            ResolvedNode::LocalTimestampNanos(_) => self.resolve_local_timestamp_nanos(),
-            ResolvedNode::Duration(_, _) => self.resolve_duration(),
-            ResolvedNode::Uuid(_, uuid_schema) => self.resolve_uuid(uuid_schema),
-            ResolvedNode::Decimal(_, DecimalSchema {
+            ResolvedNode::BigDecimal => self.resolve_bigdecimal(),
+            ResolvedNode::Date => self.resolve_date(),
+            ResolvedNode::TimeMillis => self.resolve_time_millis(),
+            ResolvedNode::TimeMicros => self.resolve_time_micros(),
+            ResolvedNode::TimestampMillis => self.resolve_timestamp_millis(),
+            ResolvedNode::TimestampMicros => self.resolve_timestamp_micros(),
+            ResolvedNode::TimestampNanos => self.resolve_timestamp_nanos(),
+            ResolvedNode::LocalTimestampMillis => self.resolve_local_timestamp_millis(),
+            ResolvedNode::LocalTimestampMicros => self.resolve_local_timestamp_micros(),
+            ResolvedNode::LocalTimestampNanos => self.resolve_local_timestamp_nanos(),
+            ResolvedNode::Duration(_) => self.resolve_duration(),
+            ResolvedNode::Uuid(uuid_schema) => self.resolve_uuid(uuid_schema),
+            ResolvedNode::Decimal(DecimalSchema {
                 scale,
                 precision,
                 inner,
@@ -1076,7 +1066,7 @@ impl Value {
                     .collect::<Result<_, _>>()?,
             )),
             other => Err(Details::GetArray {
-                expected: resolved_array.get_schema().into(),
+                expected: SchemaKind::Array,
                 other,
             }
             .into()),
@@ -1100,7 +1090,7 @@ impl Value {
                     .collect::<Result<_, _>>()?,
             )),
             other => Err(Details::GetMap {
-                expected: resolved_map.get_schema().into(),
+                expected: SchemaKind::Map,
                 other,
             }
             .into()),
@@ -1111,37 +1101,35 @@ impl Value {
         self,
         resolved_record: ResolvedRecord
     ) -> Result<Self, Error> {
-        let resolved_fields = resolved_record.resolve_fields();
         let mut items = match self {
             Value::Map(items) => Ok(items),
             Value::Record(fields) => Ok(fields.into_iter().collect::<HashMap<_, _>>()),
             other => Err(Error::new(Details::GetRecord {
-                expected: resolved_fields
+                expected: resolved_record.fields
                     .iter()
-                    .map(|field| (field.get_record_field().name.clone(),
-                                  field.get_record_field().schema.clone().into())
-                                )
+                    .map(|field| (field.name.clone(),
+                                SchemaKind::from(&field.resolve_field()))
+                            )
                     .collect(),
                 other,
             })),
         }?;
 
-        let new_fields = resolved_fields
+        let new_fields = resolved_record.fields
             .iter()
             .map(|field| {
-                let record_field = field.get_record_field();
-                let value = match items.remove(&record_field.name) {
+                let value = match items.remove(field.name) {
                     Some(value) => value,
-                    None => match record_field.default {
-                        Some(ref value) => Value::from(value.clone()),
+                    None => match field.default {
+                        Some(value) => Value::from(value.clone()),
                         None => {
-                            return Err(Details::GetField(field.get_record_field().name.clone()).into());
+                            return Err(Details::GetField(field.name.clone()).into());
                         }
                     },
                 };
                 value
                     .resolve_internal(field.resolve_field())
-                    .map(|value| (field.get_record_field().name.clone(), value))
+                    .map(|value| (field.name.clone(), value))
             })
             .collect::<Result<Vec<_>, _>>()?;
 
