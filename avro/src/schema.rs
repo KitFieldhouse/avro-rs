@@ -843,7 +843,7 @@ impl FixedSchema {
             name: Name {
                 name: String::new(),
                 namespace: None,
-            },
+            }.into(),
             aliases: None,
             doc: None,
             size: self.size,
@@ -2484,7 +2484,7 @@ impl AvroSchemaComponent for core::time::Duration {
         named_schemas
             .entry(name.clone())
             .or_insert(Schema::Duration(FixedSchema {
-                name,
+                name: name.into(),
                 aliases: None,
                 doc: None,
                 size: 12,

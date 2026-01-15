@@ -1934,7 +1934,7 @@ Field with name '"b"' is not a member of the map items"#,
                     name: Name {
                         name: "some_name".to_string(),
                         namespace: None
-                    },
+                    }.into(),
                     aliases: None,
                     doc: None,
                     size: 16,
