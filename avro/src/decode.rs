@@ -413,7 +413,7 @@ mod tests {
         let schema = Schema::Decimal(DecimalSchema {
             inner: InnerDecimalSchema::Fixed(
                 FixedSchema::builder()
-                    .name(Name::new("decimal")?)
+                    .name(Name::new("decimal")?.into())
                     .size(2)
                     .build(),
             ),
@@ -440,7 +440,7 @@ mod tests {
         let schema = Schema::Decimal(DecimalSchema {
             inner: InnerDecimalSchema::Fixed(FixedSchema {
                 size: 13,
-                name: Name::new("decimal")?,
+                name: Name::new("decimal")?.into(),
                 aliases: None,
                 doc: None,
                 default: None,
