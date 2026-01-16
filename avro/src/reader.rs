@@ -472,10 +472,10 @@ pub fn from_avro_datum_reader_schemata<R: Read>(
     reader_schemata: Vec<&Schema>,
 ) -> AvroResult<Value> {
 
-    let [resolved_writer] = ResolvedSchema::from_schemata_array([writer_schema.clone().into()], writer_schemata.into_iter().map(|schema| schema.clone().into()))?;
+    let [resolved_writer] = ResolvedSchema::from_raw_schema_array([writer_schema], writer_schemata)?;
     let resolved_reader = match reader_schema {
         Some(reader_schema) => {
-            let [resolved] = ResolvedSchema::from_schemata_array([reader_schema.clone().into()], reader_schemata.into_iter().map(|schema| schema.clone().into()))?;
+            let [resolved] = ResolvedSchema::from_raw_schema_array([reader_schema], reader_schemata)?;
             Some(resolved)
         }
         None => None
