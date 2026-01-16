@@ -571,6 +571,17 @@ impl TryFrom<Schema> for ResolvedSchema{
     }
 }
 
+impl TryFrom<&Schema> for ResolvedSchema{
+    type Error = Error;
+
+    fn try_from(schema: &Schema) -> AvroResult<Self> {
+        let schema = schema.clone();
+        let with_symbols : SchemaWithSymbols = schema.into();
+        let resolved_schema = ResolvedSchema::from_schemata(vec![with_symbols], Vec::new())?.pop().unwrap();
+        Ok(resolved_schema)
+    }
+}
+
 /// trait for implementing a custom schema name resolver. For instance this 
 /// could be used to create resolvers that lookup schema names 
 /// from a shcema registry.
