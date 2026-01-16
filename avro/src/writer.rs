@@ -17,13 +17,7 @@
 
 //! Logic handling writing in Avro format at user level.
 use crate::{
-    AvroResult, Codec, Error,
-    encode::{encode, encode_internal, encode_to_vec},
-    error::Details,
-    headers::{HeaderBuilder, RabinFingerprintHeader},
-    schema::{AvroSchema, Name, ResolvedOwnedSchema, ResolvedSchema, Schema},
-    serde::ser_schema::SchemaAwareWriteSerializer,
-    types::Value,
+    AvroResult, Codec, Error, encode::{encode, encode_internal, encode_to_vec}, error::Details, headers::{HeaderBuilder, RabinFingerprintHeader}, resolving::{ResolvedNode, ResolvedSchema}, schema::{AvroSchema, Name, Schema}, serde::ser_schema::SchemaAwareWriteSerializer, types::Value
 };
 use serde::Serialize;
 use std::{
@@ -38,10 +32,9 @@ const AVRO_OBJECT_HEADER: &[u8] = b"Obj\x01";
 /// It is critical to call flush before `Writer<W>` is dropped. Though dropping will attempt to flush
 /// the contents of the buffer, any errors that happen in the process of dropping will be ignored.
 /// Calling flush ensures that the buffer is empty and thus dropping will not even attempt file operations.
-pub struct Writer<'a, W: Write> {
-    schema: &'a Schema,
+pub struct Writer<W: Write> {
+    schema: ResolvedSchema,
     writer: W,
-    resolved_schema: ResolvedSchema<'a>,
     codec: Codec,
     block_size: usize,
     buffer: Vec<u8>,
@@ -52,11 +45,11 @@ pub struct Writer<'a, W: Write> {
 }
 
 #[bon::bon]
-impl<'a, W: Write> Writer<'a, W> {
+impl<W: Write> Writer<W> {
     #[builder]
     pub fn builder(
-        schema: &'a Schema,
-        schemata: Option<Vec<&'a Schema>>,
+        schema: &Schema,
+        schemata: Option<Vec<&Schema>>,
         writer: W,
         #[builder(default = Codec::Null)] codec: Codec,
         #[builder(default = DEFAULT_BLOCK_SIZE)] block_size: usize,
@@ -68,15 +61,37 @@ impl<'a, W: Write> Writer<'a, W> {
         has_header: bool,
         #[builder(default)] user_metadata: HashMap<String, Value>,
     ) -> AvroResult<Self> {
-        let resolved_schema = if let Some(schemata) = schemata {
-            ResolvedSchema::try_from(schemata)?
-        } else {
-            ResolvedSchema::try_from(schema)?
-        };
+        let [schema] = ResolvedSchema::from_raw_schema_array([schema], schemata.unwrap_or(vec![]).iter().cloned())?;
         Ok(Self {
             schema,
             writer,
-            resolved_schema,
+            codec,
+            block_size,
+            buffer: Vec::with_capacity(block_size),
+            num_values: 0,
+            marker,
+            has_header,
+            user_metadata,
+        })
+    }
+
+    #[builder]
+    pub fn builder_complete(
+        schema: ResolvedSchema,
+        writer: W,
+        #[builder(default = Codec::Null)] codec: Codec,
+        #[builder(default = DEFAULT_BLOCK_SIZE)] block_size: usize,
+        #[builder(default = generate_sync_marker())] marker: [u8; 16],
+        /// Has the header already been written.
+        ///
+        /// To disable writing the header, this can be set to `true`.
+        #[builder(default = false)]
+        has_header: bool,
+        #[builder(default)] user_metadata: HashMap<String, Value>,
+    ) -> AvroResult<Self> {
+        Ok(Self {
+            schema,
+            writer,
             codec,
             block_size,
             buffer: Vec::with_capacity(block_size),
@@ -88,17 +103,17 @@ impl<'a, W: Write> Writer<'a, W> {
     }
 }
 
-impl<'a, W: Write> Writer<'a, W> {
+impl<W: Write> Writer<W> {
     /// Creates a `Writer` given a `Schema` and something implementing the `io::Write` trait to write
     /// to.
     /// No compression `Codec` will be used.
-    pub fn new(schema: &'a Schema, writer: W) -> AvroResult<Self> {
+    pub fn new(schema: &Schema, writer: W) -> AvroResult<Self> {
         Writer::with_codec(schema, writer, Codec::Null)
     }
 
     /// Creates a `Writer` with a specific `Codec` given a `Schema` and something implementing the
     /// `io::Write` trait to write to.
-    pub fn with_codec(schema: &'a Schema, writer: W, codec: Codec) -> AvroResult<Self> {
+    pub fn with_codec(schema: &Schema, writer: W, codec: Codec) -> AvroResult<Self> {
         Self::builder()
             .schema(schema)
             .writer(writer)
@@ -111,8 +126,8 @@ impl<'a, W: Write> Writer<'a, W> {
     /// If the `schema` is incomplete, i.e. contains `Schema::Ref`s then all dependencies must
     /// be provided in `schemata`.
     pub fn with_schemata(
-        schema: &'a Schema,
-        schemata: Vec<&'a Schema>,
+        schema: &Schema,
+        schemata: Vec<&Schema>,
         writer: W,
         codec: Codec,
     ) -> AvroResult<Self> {
@@ -124,17 +139,29 @@ impl<'a, W: Write> Writer<'a, W> {
             .build()
     }
 
+    pub fn with_complete_schemata(
+        resolved_schema: ResolvedSchema,
+        writer: W,
+        codec: Codec,
+    ) -> AvroResult<Self>{
+        Self::builder_complete()
+            .schema(resolved_schema)
+            .writer(writer)
+            .codec(codec)
+            .call()
+    }
+
     /// Creates a `Writer` that will append values to already populated
     /// `std::io::Write` using the provided `marker`
     /// No compression `Codec` will be used.
-    pub fn append_to(schema: &'a Schema, writer: W, marker: [u8; 16]) -> AvroResult<Self> {
+    pub fn append_to(schema: &Schema, writer: W, marker: [u8; 16]) -> AvroResult<Self> {
         Writer::append_to_with_codec(schema, writer, Codec::Null, marker)
     }
 
     /// Creates a `Writer` that will append values to already populated
     /// `std::io::Write` using the provided `marker`
     pub fn append_to_with_codec(
-        schema: &'a Schema,
+        schema: &Schema,
         writer: W,
         codec: Codec,
         marker: [u8; 16],
@@ -151,8 +178,8 @@ impl<'a, W: Write> Writer<'a, W> {
     /// Creates a `Writer` that will append values to already populated
     /// `std::io::Write` using the provided `marker`
     pub fn append_to_with_codec_schemata(
-        schema: &'a Schema,
-        schemata: Vec<&'a Schema>,
+        schema: &Schema,
+        schemata: Vec<&Schema>,
         writer: W,
         codec: Codec,
         marker: [u8; 16],
@@ -168,8 +195,8 @@ impl<'a, W: Write> Writer<'a, W> {
     }
 
     /// Get a reference to the `Schema` associated to a `Writer`.
-    pub fn schema(&self) -> &'a Schema {
-        self.schema
+    pub fn schema(&self) -> &Schema {
+        &self.schema.schema
     }
 
     /// Append a compatible value (implementing the `ToAvro` trait) to a `Writer`, also performing
@@ -197,7 +224,7 @@ impl<'a, W: Write> Writer<'a, W> {
     pub fn append_value_ref(&mut self, value: &Value) -> AvroResult<usize> {
         let n = self.maybe_write_header()?;
 
-        write_value_ref_resolved(self.schema, &self.resolved_schema, value, &mut self.buffer)?;
+        write_value_ref_resolved(&self.schema, value, &mut self.buffer)?;
         self.num_values += 1;
 
         if self.buffer.len() >= self.block_size {
@@ -219,10 +246,11 @@ impl<'a, W: Write> Writer<'a, W> {
     pub fn append_ser<S: Serialize>(&mut self, value: S) -> AvroResult<usize> {
         let n = self.maybe_write_header()?;
 
+        let names = self.schema.get_names();
         let mut serializer = SchemaAwareWriteSerializer::new(
             &mut self.buffer,
-            self.schema,
-            self.resolved_schema.get_names(),
+            &self.schema.schema,
+            &names,
             None,
         );
         value.serialize(&mut serializer)?;
@@ -369,7 +397,7 @@ impl<'a, W: Write> Writer<'a, W> {
         let _buffer = std::mem::take(&mut this.buffer);
         let _user_metadata = std::mem::take(&mut this.user_metadata);
         // SAFETY: resolved schema is not accessed after this and won't be dropped because of ManuallyDrop
-        unsafe { std::ptr::drop_in_place(&mut this.resolved_schema) };
+        unsafe { std::ptr::drop_in_place(&mut this.schema) };
 
         // SAFETY: double-drops are prevented by putting `this` in a ManuallyDrop that is never dropped
         let writer = unsafe { std::ptr::read(&this.writer) };
@@ -433,7 +461,7 @@ impl<'a, W: Write> Writer<'a, W> {
 
     /// Create an Avro header based on schema, codec and sync marker.
     fn header(&self) -> Result<Vec<u8>, Error> {
-        let schema_bytes = serde_json::to_string(self.schema)
+        let schema_bytes = serde_json::to_string(self.schema.schema.as_ref())
             .map_err(Details::ConvertJsonToString)?
             .into_bytes();
 
@@ -491,7 +519,7 @@ impl<'a, W: Write> Writer<'a, W> {
     }
 }
 
-impl<W: Write> Drop for Writer<'_, W> {
+impl<W: Write> Drop for Writer<W> {
     /// Drop the writer, will try to flush ignoring any errors.
     fn drop(&mut self) {
         let _ = self.maybe_write_header();
@@ -524,13 +552,12 @@ fn write_avro_datum_schemata<T: Into<Value>>(
     buffer: &mut Vec<u8>,
 ) -> AvroResult<usize> {
     let avro = value.into();
-    let rs = ResolvedSchema::try_from(schemata)?;
-    let names = rs.get_names();
-    let enclosing_namespace = schema.namespace();
-    if let Some(_err) = avro.validate_internal(schema, names, &enclosing_namespace) {
+    let [resolved_schema] = ResolvedSchema::from_raw_schema_array([schema], schemata)?;
+    let resolved_node = ResolvedNode::new(&resolved_schema);
+    if let Some(_err) = avro.validate_internal(resolved_node.clone()) {
         return Err(Details::Validation.into());
     }
-    encode_internal(&avro, schema, names, &enclosing_namespace, buffer)
+    encode_internal(&avro, resolved_node, buffer)
 }
 
 /// Writer that encodes messages according to the single object encoding v1 spec
@@ -538,7 +565,7 @@ fn write_avro_datum_schemata<T: Into<Value>>(
 /// Writes all object bytes at once, and drains internal buffer
 pub struct GenericSingleObjectWriter {
     buffer: Vec<u8>,
-    resolved: ResolvedOwnedSchema,
+    resolved: ResolvedSchema,
 }
 
 impl GenericSingleObjectWriter {
@@ -561,7 +588,7 @@ impl GenericSingleObjectWriter {
 
         Ok(GenericSingleObjectWriter {
             buffer,
-            resolved: ResolvedOwnedSchema::try_from(schema.clone())?,
+            resolved: ResolvedSchema::try_from(schema.clone())?,
         })
     }
 
@@ -573,7 +600,7 @@ impl GenericSingleObjectWriter {
         if !Self::HEADER_LENGTH_RANGE.contains(&original_length) {
             Err(Details::IllegalSingleObjectWriterState.into())
         } else {
-            write_value_ref_owned_resolved(&self.resolved, v, &mut self.buffer)?;
+            write_value_ref_resolved(&self.resolved, v, &mut self.buffer)?;
             writer
                 .write_all(&self.buffer)
                 .map_err(Details::WriteBytes)?;
@@ -656,54 +683,24 @@ where
 }
 
 fn write_value_ref_resolved(
-    schema: &Schema,
     resolved_schema: &ResolvedSchema,
     value: &Value,
     buffer: &mut Vec<u8>,
 ) -> AvroResult<usize> {
-    match value.validate_internal(schema, resolved_schema.get_names(), &schema.namespace()) {
+    let resolved_node = ResolvedNode::new(resolved_schema);
+    match value.validate_internal(resolved_node.clone()) {
         Some(reason) => Err(Details::ValidationWithReason {
             value: value.clone(),
-            schema: schema.clone(),
+            schema: resolved_schema.schema.as_ref().clone(),
             reason,
         }
         .into()),
         None => encode_internal(
             value,
-            schema,
-            resolved_schema.get_names(),
-            &schema.namespace(),
-            buffer,
+            resolved_node,
+            buffer
         ),
     }
-}
-
-fn write_value_ref_owned_resolved(
-    resolved_schema: &ResolvedOwnedSchema,
-    value: &Value,
-    buffer: &mut Vec<u8>,
-) -> AvroResult<()> {
-    let root_schema = resolved_schema.get_root_schema();
-    if let Some(reason) = value.validate_internal(
-        root_schema,
-        resolved_schema.get_names(),
-        &root_schema.namespace(),
-    ) {
-        return Err(Details::ValidationWithReason {
-            value: value.clone(),
-            schema: root_schema.clone(),
-            reason,
-        }
-        .into());
-    }
-    encode_internal(
-        value,
-        root_schema,
-        resolved_schema.get_names(),
-        &root_schema.namespace(),
-        buffer,
-    )?;
-    Ok(())
 }
 
 /// Encode a compatible value (implementing the `ToAvro` trait) into Avro format, also
@@ -1048,7 +1045,7 @@ mod tests {
         logical_type_test(
             r#"{"type": {"type": "fixed", "name": "duration", "size": 12}, "logicalType": "duration"}"#,
             &Schema::Duration(FixedSchema {
-                name: Name::from("duration"),
+                name: Name::from("duration").into(),
                 aliases: None,
                 doc: None,
                 size: 12,
@@ -1437,7 +1434,7 @@ mod tests {
         user_meta_data.insert("bytesKey".to_string(), Value::Bytes(b"bytesValue".to_vec()));
         user_meta_data.insert("vecKey".to_string(), Value::Bytes(vec![1, 2, 3]));
 
-        let writer: Writer<'_, Vec<u8>> = Writer::builder()
+        let writer: Writer<Vec<u8>> = Writer::builder()
             .writer(Vec::new())
             .schema(&schema)
             .user_metadata(user_meta_data.clone())
@@ -1709,7 +1706,8 @@ mod tests {
 
         let mut writer = Writer::new(&schema, buffered_writer)?;
 
-        let mut record = Record::new(writer.schema()).unwrap();
+        let writer_schema = writer.schema().clone();
+        let mut record = Record::new(&writer_schema).unwrap();
         record.put("exampleField", "value");
 
         writer.append(record)?;
