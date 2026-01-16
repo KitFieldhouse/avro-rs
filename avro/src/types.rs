@@ -529,7 +529,7 @@ impl Value {
                 .map(|node| value.validate_internal(node.clone()))
                 .unwrap_or_else(|| Some(format!("No schema in the union at position '{i}'"))),
             (v, ResolvedNode::Union(inner)) => {
-                match inner.find_schema_with_known_schemata(v, Some(names), enclosing_namespace) {
+                match inner.structural_match_on_schema(v) {
                     Some(_) => None,
                     None => Some("Could not find matching type in union".to_string()),
                 }
@@ -1022,35 +1022,18 @@ impl Value {
             // Reader is a union, but writer is not.
             v => v,
         };
-        // our value is not a union, hence, we need to look at the union schema and find a match
-        // TODO: I think the precise semantics of this could be made more inline with the
-        // specification. For instance....
-        let union_schema = resolved_union.get_union_schema();
-        let value_schema_kind = SchemaKind::from(&v);
-        let resolved_nodes = resolved_union.resolve_schemas();
-        if let Some(i) = union_schema.get_variant_index(&value_schema_kind) {
-            // fast path
-            Ok( Value::Union(
-                    i as u32,
-                    Box::new(v.resolve_internal(resolved_nodes.get(i).unwrap().clone())?))
-                )
-        } else {
-            // slow path (required for matching logical or named types)
-            let (i,node) = resolved_union.resolve_schemas().into_iter().enumerate().find(|(_, resolved_node)| {
-               v
-                    .clone()
-                    .resolve_internal(resolved_node.clone())
-                    .is_ok()
-            }).ok_or_else(|| Details::FindUnionVariant {
+
+        let (i, inner) = resolved_union
+            .structural_match_on_schema(&v)
+            .ok_or_else(|| Details::FindUnionVariant {
                 schema: resolved_union.get_union_schema().clone(),
                 value: v.clone(),
             })?;
 
-            Ok( Value::Union(
-                    i as u32,
-                    Box::new(v.resolve_internal(node)?))
-                )
-        }
+        Ok( Value::Union(
+            i as u32,
+            Box::new(v.resolve_internal(inner)?))
+        )
     }
 
     fn resolve_array(
