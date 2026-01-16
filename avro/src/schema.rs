@@ -937,66 +937,9 @@ impl UnionSchema {
         &self.schemas
     }
 
-    pub fn get_variant_index(&self, schema_kind: &SchemaKind) -> Option<usize>{
-       self.variant_index.get(schema_kind).copied()
-    }
-
-    pub fn get_variant_with_type(&self, schema_kind: &SchemaKind) -> Option<&Schema>{
-       Some(&self.schemas[*self.variant_index.get(schema_kind)?])
-    }
-
     /// Returns true if the any of the variants of this `UnionSchema` is `Null`.
     pub fn is_nullable(&self) -> bool {
         self.schemas.iter().any(|x| matches!(x, Schema::Null))
-    }
-
-    /// Optionally returns a reference to the schema matched by this value, as well as its position
-    /// within this union.
-    ///
-    /// Extra arguments:
-    /// - `known_schemata` - mapping between `Name` and `Schema` - if passed, additional external schemas would be used to resolve references.
-    pub fn find_schema_with_known_schemata<S: Borrow<Schema> + Debug>(
-        &self,
-        value: &types::Value,
-        known_schemata: Option<&HashMap<Name, S>>,
-        enclosing_namespace: &Namespace,
-    ) -> Option<(usize, &Schema)> {
-        let schema_kind = SchemaKind::from(value);
-        if let Some(&i) = self.variant_index.get(&schema_kind) {
-            // fast path
-            Some((i, &self.schemas[i]))
-        } else {
-            // slow path (required for matching logical or named types)
-
-            // first collect what schemas we already know
-            let mut collected_names: HashMap<Name, &Schema> = known_schemata
-                .map(|names| {
-                    names
-                        .iter()
-                        .map(|(name, schema)| (name.clone(), schema.borrow()))
-                        .collect()
-                })
-                .unwrap_or_default();
-
-            self.schemas.iter().enumerate().find(|(_, schema)| {
-                let resolved_schema = ResolvedSchema::new_with_known_schemata(
-                    vec![*schema],
-                    enclosing_namespace,
-                    &collected_names,
-                )
-                .expect("Schema didn't successfully parse");
-                let resolved_names = resolved_schema.names_ref;
-
-                // extend known schemas with just resolved names
-                collected_names.extend(resolved_names);
-                let namespace = &schema.namespace().or_else(|| enclosing_namespace.clone());
-
-                value
-                    .clone()
-                    .resolve_internal(schema, &collected_names, namespace, &None)
-                    .is_ok()
-            })
-        }
     }
 }
 
