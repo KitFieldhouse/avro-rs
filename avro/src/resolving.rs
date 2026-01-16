@@ -79,7 +79,7 @@ impl ResolvedSchema{
         Ok(resolved.drain(0..to_resolve_len).collect())
     }
 
-    pub fn from_unresolved_schemata_array<'a,const N: usize>(to_resolve: [&Schema;N], schemata: impl IntoIterator<Item = &'a Schema>) -> AvroResult<[ResolvedSchema; N]>{
+    pub fn from_raw_schema_array<'a,const N: usize>(to_resolve: [&Schema;N], schemata: impl IntoIterator<Item = &'a Schema>) -> AvroResult<[ResolvedSchema; N]>{
         let to_resolve_with_symbols : [SchemaWithSymbols; N] = std::array::from_fn(|i|{
             (*to_resolve.get(i).unwrap()).clone().into()
         });
