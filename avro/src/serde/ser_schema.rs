@@ -598,6 +598,7 @@ impl<W: Write> ser::SerializeTupleVariant for SchemaAwareWriteSerializeTupleStru
 /// data with its schema, it will return an error.
 /// A [`SchemaAwareWriteSerializer`] instance can be re-used to serialize multiple values matching
 /// the schema to its [`std::fmt::Write`] stream.
+/// TODO: need to transition this to using ResolvedSchema directly...
 pub struct SchemaAwareWriteSerializer<'s, W: Write> {
     writer: &'s mut W,
     root_schema: &'s Schema,
