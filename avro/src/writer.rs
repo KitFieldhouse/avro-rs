@@ -1202,7 +1202,7 @@ mod tests {
         Ok(())
     }
 
-    fn make_writer_with_codec(schema: &Schema) -> AvroResult<Writer<'_, Vec<u8>>> {
+    fn make_writer_with_codec(schema: &Schema) -> AvroResult<Writer<Vec<u8>>> {
         Writer::with_codec(
             schema,
             Vec::new(),
@@ -1210,7 +1210,7 @@ mod tests {
         )
     }
 
-    fn make_writer_with_builder(schema: &Schema) -> AvroResult<Writer<'_, Vec<u8>>> {
+    fn make_writer_with_builder(schema: &Schema) -> AvroResult<Writer<Vec<u8>>> {
         Writer::builder()
             .writer(Vec::new())
             .schema(schema)
@@ -1219,7 +1219,7 @@ mod tests {
             .build()
     }
 
-    fn check_writer(mut writer: Writer<'_, Vec<u8>>, schema: &Schema) -> TestResult {
+    fn check_writer(mut writer: Writer<Vec<u8>>, schema: &Schema) -> TestResult {
         let mut record = Record::new(schema).unwrap();
         record.put("a", 27i64);
         record.put("b", "foo");
