@@ -297,7 +297,7 @@ impl<'a> ResolvedNode<'a> {
    fn from_schema(schema: &'a Schema, root: &'a ResolvedSchema) -> ResolvedNode<'a>{
        match schema {
         Schema::Map(MapSchema{attributes, types}) => ResolvedNode::Map(ResolvedMap{attributes, types, root}),
-        Schema::Union(UnionSchema { schemas, variant_index}) => ResolvedNode::Union(ResolvedUnion{schemas, variant_index, root}),
+        Schema::Union(union_schema) => ResolvedNode::Union(ResolvedUnion{union_schema, schemas: &union_schema.schemas, variant_index: &union_schema.variant_index, root}),
         Schema::Array(ArraySchema { items, attributes }) => ResolvedNode::Array(ResolvedArray{items, attributes, root}),
         Schema::Record(RecordSchema { name, aliases, doc, fields, lookup, attributes }) => {
             let fields = fields.iter()
