@@ -1073,8 +1073,8 @@ impl Schema {
 
     /// Parses an Avro schema from JSON.
     pub fn parse(value: &Value) -> AvroResult<Schema> {
-        let mut parser = Parser::default();
-        parser.parse(value, &None)
+        let parser = Parser::default();
+        Ok(parser.parse(value, &None)?.schema.as_ref().clone())
     }
 
     /// Returns the custom attributes (metadata) if the schema supports them.
@@ -1203,9 +1203,15 @@ impl Schema {
 impl Parser {
     /// Create a `Schema` from a string representing a JSON Avro schema.
     /// Consumes the parser in the process.
-    fn parse_str(mut self, input: &str) -> Result<SchemaWithSymbols, Error> {
+    fn parse_str(self, input: &str) -> Result<SchemaWithSymbols, Error> {
         let value = serde_json::from_str(input).map_err(Details::ParseSchemaJson)?;
-        let schema = self.parse(&value, &None)?;
+        self.parse(&value, &None)
+    }
+
+    /// Create a `SchemaWithSymbols` from a `serde_json::Value` representing a JSON Avro
+    /// schema.
+    fn parse(mut self, value: &Value, enclosing_namespace: &Namespace) -> AvroResult<SchemaWithSymbols>{
+        let schema = self.parse_internal(&value, enclosing_namespace)?;
         let defined_names : HashMap<Arc<Name>, Arc<Schema>> = HashMap::from_iter(self.defined_names.drain().map(|(key, val)| {
             match val {
                 ReservedSchema::Reserved => {panic!("reserved schema encountered that was not provided a definition")}
@@ -1222,7 +1228,7 @@ impl Parser {
 
     /// Create a `Schema` from a `serde_json::Value` representing a JSON Avro
     /// schema.
-    fn parse(&mut self, value: &Value, enclosing_namespace: &Namespace) -> AvroResult<Schema> {
+    fn parse_internal(&mut self, value: &Value, enclosing_namespace: &Namespace) -> AvroResult<Schema> {
         match *value {
             Value::String(ref t) => self.parse_known_schema(t.as_str(), enclosing_namespace),
             Value::Object(ref data) => {
@@ -1325,7 +1331,7 @@ impl Parser {
                     Value::String(s) if s == "fixed" => {
                         parser.parse_fixed(complex, enclosing_namespace)
                     }
-                    _ => parser.parse(value, enclosing_namespace),
+                    _ => parser.parse_internal(value, enclosing_namespace),
                 },
                 None => Err(Details::GetLogicalTypeField.into()),
             }
@@ -1748,7 +1754,7 @@ impl Parser {
         complex
             .get("items")
             .ok_or_else(|| Details::GetArrayItemsField.into())
-            .and_then(|items| self.parse(items, enclosing_namespace))
+            .and_then(|items| self.parse_internal(items, enclosing_namespace))
             .map(|items| {
                 Schema::array_with_attributes(
                     items,
@@ -1767,7 +1773,7 @@ impl Parser {
         complex
             .get("values")
             .ok_or_else(|| Details::GetMapValuesField.into())
-            .and_then(|items| self.parse(items, enclosing_namespace))
+            .and_then(|items| self.parse_internal(items, enclosing_namespace))
             .map(|items| {
                 Schema::map_with_attributes(
                     items,
@@ -1785,7 +1791,7 @@ impl Parser {
     ) -> AvroResult<Schema> {
         items
             .iter()
-            .map(|v| self.parse(v, enclosing_namespace))
+            .map(|v| self.parse_internal(v, enclosing_namespace))
             .collect::<Result<Vec<_>, _>>()
             .and_then(|schemas| {
                 if schemas.is_empty() {
