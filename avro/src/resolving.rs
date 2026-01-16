@@ -21,7 +21,7 @@ use serde::Serialize;
 use serde_json::Value;
 
 use crate::schema::{self, derive, Aliases, ArraySchema, DecimalSchema, Documentation, EnumSchema, FixedSchema, LeafSchema, MapSchema, Name, RecordField, RecordFieldOrder, RecordSchema, Schema, SchemaKind, SchemaWithSymbols, UnionSchema, UuidSchema};
-use crate::AvroResult;
+use crate::{AvroResult, types};
 use crate::error::{Details,Error};
 use std::collections::BTreeMap;
 use std::{collections::{HashMap, HashSet}, sync::Arc, iter::once};
@@ -217,6 +217,8 @@ pub struct ResolvedMap<'a>{
 #[derive(Clone, Debug)]
 pub struct ResolvedUnion<'a>{
     pub variant_index: &'a BTreeMap<SchemaKind, usize>,
+
+    union_schema: &'a UnionSchema,
     schemas: &'a Vec<Schema>,
     root: &'a ResolvedSchema
 }
@@ -374,6 +376,33 @@ impl<'a> ResolvedUnion<'a>{
         self.schemas.iter().map(|schema|{
             ResolvedNode::from_schema(schema, self.root)
         }).collect()
+    }
+
+    /// For getting the original schema for nice error printing
+    /// Other than that, use should be avoided.
+    pub(crate) fn get_union_schema(&self) -> &'a UnionSchema{
+        self.union_schema
+    }
+
+    pub fn structural_match_on_schema(&self, value: &types::Value) -> Option<(usize,ResolvedNode)>{
+        let value_schema_kind = SchemaKind::from(value);
+        let resolved_nodes = self.resolve_schemas();
+        if let Some(i) = self.get_variant_index(&value_schema_kind) {
+            // fast path
+            Some((i, resolved_nodes.get(i).unwrap().clone()))
+        } else {
+            // slow path (required for matching logical or named types)
+            self.resolve_schemas().into_iter().enumerate().find(|(_, resolved_node)| {
+                value
+                    .clone()
+                    .resolve_internal(resolved_node.clone())
+                    .is_ok()
+            })
+        }
+    }
+
+    pub fn get_variant_index(&self, schema_kind: &SchemaKind) -> Option<usize>{
+       self.variant_index.get(schema_kind).copied()
     }
 }
 
