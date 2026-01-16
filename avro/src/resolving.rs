@@ -571,6 +571,7 @@ impl TryFrom<Schema> for ResolvedSchema{
     }
 }
 
+/// NOTE: this will copy the schema, and is therefore not the most performant option
 impl TryFrom<&Schema> for ResolvedSchema{
     type Error = Error;
 
