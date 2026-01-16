@@ -17,17 +17,9 @@
 
 //! Logic handling reading from Avro format at user level.
 use crate::{
-    AvroResult, Codec, Error,
-    decode::{decode, decode_internal},
-    error::Details,
-    from_value,
-    headers::{HeaderBuilder, RabinFingerprintHeader},
-    schema::{
-        AvroSchema, Names, ResolvedOwnedSchema, ResolvedSchema, Schema, resolve_names,
-        resolve_names_with_schemata,
-    },
-    types::Value,
-    util,
+    AvroResult, Codec, Error, decode::{decode, decode_complete, decode_internal}, error::Details, from_value, headers::{HeaderBuilder, RabinFingerprintHeader}, resolving::ResolvedSchema, schema::{
+        AvroSchema, Names, Schema, SchemaWithSymbols, resolve_names, resolve_names_with_schemata
+    }, types::Value, util
 };
 use log::warn;
 use serde::de::DeserializeOwned;
@@ -41,7 +33,7 @@ use std::{
 
 /// Internal Block reader.
 #[derive(Debug, Clone)]
-struct Block<'r, R> {
+struct Block<R> {
     reader: R,
     /// Internal buffering to reduce allocation.
     buf: Vec<u8>,
@@ -50,25 +42,23 @@ struct Block<'r, R> {
     message_count: usize,
     marker: [u8; 16],
     codec: Codec,
-    writer_schema: Schema,
-    schemata: Vec<&'r Schema>,
+    writer_schema: ResolvedSchema,
+    schemata: Vec<SchemaWithSymbols>,
     user_metadata: HashMap<String, Vec<u8>>,
-    names_refs: Names,
 }
 
-impl<'r, R: Read> Block<'r, R> {
-    fn new(reader: R, schemata: Vec<&'r Schema>) -> AvroResult<Block<'r, R>> {
+impl<'r, R: Read> Block<R> {
+    fn new(reader: R, schemata: Vec<SchemaWithSymbols>) -> AvroResult<Block<R>> {
         let mut block = Block {
             reader,
             codec: Codec::Null,
-            writer_schema: Schema::Null,
+            writer_schema: ResolvedSchema::new_empty(),
             schemata,
             buf: vec![],
             buf_idx: 0,
             message_count: 0,
             marker: [0; 16],
             user_metadata: Default::default(),
-            names_refs: Default::default(),
         };
 
         block.read_header()?;
@@ -193,10 +183,8 @@ impl<'r, R: Read> Block<'r, R> {
         let mut block_bytes = &self.buf[self.buf_idx..];
         let b_original = block_bytes.len();
 
-        let item = decode_internal(
+        let item = decode_complete(
             &self.writer_schema,
-            &self.names_refs,
-            &None,
             &mut block_bytes,
         )?;
         let item = match read_schema {
@@ -224,23 +212,8 @@ impl<'r, R: Read> Block<'r, R> {
                 }
             })
             .ok_or(Details::GetAvroSchemaFromMap)?;
-        if !self.schemata.is_empty() {
-            let rs = ResolvedSchema::try_from(self.schemata.clone())?;
-            let names: Names = rs
-                .get_names()
-                .iter()
-                .map(|(name, schema)| (name.clone(), (*schema).clone()))
-                .collect();
-            self.writer_schema = Schema::parse_with_names(&json, names)?;
-            resolve_names_with_schemata(
-                self.schemata.iter().copied(),
-                &mut self.names_refs,
-                &None,
-            )?;
-        } else {
-            self.writer_schema = Schema::parse(&json)?;
-            resolve_names(&self.writer_schema, &mut self.names_refs, &None)?;
-        }
+        let schema_from_header = SchemaWithSymbols::parse(&json)?;
+        [self.writer_schema] = ResolvedSchema::from_schemata_array([schema_from_header], self.schemata.iter().cloned())?;
         Ok(())
     }
 
@@ -331,7 +304,7 @@ fn read_codec(metadata: &HashMap<String, Value>) -> AvroResult<Codec> {
 /// }
 /// ```
 pub struct Reader<'a, R> {
-    block: Block<'a, R>,
+    block: Block<R>,
     reader_schema: Option<&'a Schema>,
     errored: bool,
     should_resolve_schema: bool,
@@ -358,7 +331,7 @@ impl<'a, R: Read> Reader<'a, R> {
     ///
     /// **NOTE** The avro header is going to be read automatically upon creation of the `Reader`.
     pub fn with_schema(schema: &'a Schema, reader: R) -> AvroResult<Reader<'a, R>> {
-        let block = Block::new(reader, vec![schema])?;
+        let block = Block::new(reader, vec![schema.clone().into()])?;
         let mut reader = Reader {
             block,
             reader_schema: Some(schema),
@@ -379,7 +352,7 @@ impl<'a, R: Read> Reader<'a, R> {
         schemata: Vec<&'a Schema>,
         reader: R,
     ) -> AvroResult<Reader<'a, R>> {
-        let block = Block::new(reader, schemata)?;
+        let block = Block::new(reader, schemata.iter().map(|schema| (**schema).clone().into()).collect())?;
         let mut reader = Reader {
             block,
             reader_schema: Some(schema),
@@ -394,7 +367,7 @@ impl<'a, R: Read> Reader<'a, R> {
     /// Get a reference to the writer `Schema`.
     #[inline]
     pub fn writer_schema(&self) -> &Schema {
-        &self.block.writer_schema
+        &self.block.writer_schema.schema
     }
 
     /// Get a reference to the optional reader `Schema`.
@@ -485,6 +458,11 @@ pub fn from_avro_datum_schemata<R: Read>(
 /// If the writer schema is incomplete, i.e. contains `Schema::Ref`s then it will use the provided
 /// schemata to resolve any dependencies.
 ///
+/// This method will first attempt to form a ResolvedSchema from the provided writer_schema and
+/// writer_schemata and, if provided, from the reader_schema and reader_schemata. This is done on
+/// every invocation, so, when possible, from_avro_datum_resolved_schema should be preferred for
+/// perfromance.
+///
 /// In case a reader `Schema` is provided, schema resolution will also be performed.
 pub fn from_avro_datum_reader_schemata<R: Read>(
     writer_schema: &Schema,
@@ -493,22 +471,38 @@ pub fn from_avro_datum_reader_schemata<R: Read>(
     reader_schema: Option<&Schema>,
     reader_schemata: Vec<&Schema>,
 ) -> AvroResult<Value> {
-    let rs = ResolvedSchema::try_from(writer_schemata)?;
-    let value = decode_internal(writer_schema, rs.get_names(), &None, reader)?;
+
+    let [resolved_writer] = ResolvedSchema::from_schemata_array([writer_schema.clone().into()], writer_schemata.into_iter().map(|schema| schema.clone().into()))?;
+    let resolved_reader = match reader_schema {
+        Some(reader_schema) => {
+            let [resolved] = ResolvedSchema::from_schemata_array([reader_schema.clone().into()], reader_schemata.into_iter().map(|schema| schema.clone().into()))?;
+            Some(resolved)
+        }
+        None => None
+    };
+
+    from_avro_datum_resolved_schema(resolved_writer, reader, resolved_reader)
+}
+
+/// Decode a `Value` encoded in Avro format given the provided writer `ResolvedSchema`
+///
+/// In case a reader `ResolvedSchema` is provided, schema resolution will also be performed.
+pub fn from_avro_datum_resolved_schema<R: Read>(
+    writer_schema: ResolvedSchema,
+    reader: &mut R,
+    reader_schema: Option<ResolvedSchema>
+) -> AvroResult<Value> {
+    let value = decode_complete(&writer_schema, reader)?;
     match reader_schema {
-        Some(schema) => {
-            if reader_schemata.is_empty() {
-                value.resolve(schema)
-            } else {
-                value.resolve_schemata(schema, reader_schemata)
-            }
+        Some(resolved_reader_schema) => {
+            value.resolve_complete(resolved_reader_schema)
         }
         None => Ok(value),
     }
 }
 
 pub struct GenericSingleObjectReader {
-    write_schema: ResolvedOwnedSchema,
+    write_schema: ResolvedSchema,
     expected_header: Vec<u8>,
 }
 
@@ -524,7 +518,7 @@ impl GenericSingleObjectReader {
     ) -> AvroResult<GenericSingleObjectReader> {
         let expected_header = header_builder.build_header();
         Ok(GenericSingleObjectReader {
-            write_schema: ResolvedOwnedSchema::try_from(schema)?,
+            write_schema: ResolvedSchema::try_from(schema)?,
             expected_header,
         })
     }
@@ -534,10 +528,8 @@ impl GenericSingleObjectReader {
         match reader.read_exact(&mut header) {
             Ok(_) => {
                 if self.expected_header == header {
-                    decode_internal(
-                        self.write_schema.get_root_schema(),
-                        self.write_schema.get_names(),
-                        &None,
+                    decode_complete(
+                        &self.write_schema,
                         reader,
                     )
                 } else {
