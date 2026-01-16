@@ -32,7 +32,7 @@ use std::{collections::{HashMap, HashSet}, sync::Arc, iter::once};
 /// type in the schema has exactly one unique definition
 /// and every named reference in the schema can be uniquely
 /// resolved to one of these definitions.
-#[derive(Debug)]
+#[derive(Debug,Clone)]
 pub struct ResolvedSchema{
     pub schema: Arc<Schema>,
     context_definitions: HashMap<Arc<Name>,Arc<Schema>>
@@ -43,6 +43,10 @@ pub type NameMap = HashMap<Arc<Name>, Arc<Schema>>;
 pub type NameSet = HashSet<Arc<Name>>;
 
 impl ResolvedSchema{
+    pub fn new_empty() -> Self{
+       Schema::Null.try_into().unwrap()
+    }
+
     pub fn from_str(input: impl AsRef<str>) -> AvroResult<ResolvedSchema>{
         Self::from_str_with_resolver(input, &mut DefaultResolver::new())
     }
