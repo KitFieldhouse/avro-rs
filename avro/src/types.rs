@@ -19,15 +19,13 @@
 use crate::schema::{InnerDecimalSchema, UuidSchema};
 use crate::{
     bigdecimal::{deserialize_big_decimal, serialize_big_decimal}, decimal::Decimal, duration::Duration, error::Details, resolving::{ResolvedArray, ResolvedMap, ResolvedNode, ResolvedRecord, ResolvedSchema, ResolvedUnion}, schema::{
-        DecimalSchema, EnumSchema, FixedSchema, ResolvedNode, Name, Namespace, Precision, RecordField, RecordSchema, ResolvedSchema, Scale, Schema, SchemaKind, UnionSchema
+        DecimalSchema, EnumSchema, FixedSchema, RecordSchema, Schema, SchemaKind, Scale, Precision
     }, AvroResult, Error
 };
 use bigdecimal::BigDecimal;
-use log::{debug, error};
-use rand::seq::index;
+use log::{error};
 use serde_json::{Number, Value as JsonValue};
 use std::{
-    borrow::Borrow,
     collections::{BTreeMap, HashMap},
     fmt::Debug,
     hash::BuildHasher,
@@ -1138,7 +1136,7 @@ mod tests {
     use crate::{
         duration::{Days, Millis, Months},
         error::Details,
-        schema::RecordFieldOrder,
+        schema::{Name, RecordField, RecordFieldOrder, UnionSchema},
     };
     use apache_avro_test_helper::{
         TestResult,
@@ -1349,7 +1347,7 @@ mod tests {
 
         for (value, schema, valid, expected_err_message) in value_schema_valid.into_iter() {
             let err_message =
-                value.validate_internal::<Schema>(&schema, &HashMap::default(), &None);
+                value.validate_internal(ResolvedNode::new(&ResolvedSchema::try_from(&schema)?));
             assert_eq!(valid, err_message.is_none());
             if !valid {
                 let full_err_message = format!(
@@ -1844,7 +1842,7 @@ Field with name '"b"' is not a member of the map items"#,
             value
                 .clone()
                 .resolve(&Schema::Duration(FixedSchema {
-                    name: Name::from("TestName"),
+                    name: Name::from("TestName").into(),
                     aliases: None,
                     doc: None,
                     size: 12,
@@ -1857,7 +1855,7 @@ Field with name '"b"' is not a member of the map items"#,
         assert!(
             Value::Long(1i64)
                 .resolve(&Schema::Duration(FixedSchema {
-                    name: Name::from("TestName"),
+                    name: Name::from("TestName").into(),
                     aliases: None,
                     doc: None,
                     size: 12,

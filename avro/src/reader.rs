@@ -17,8 +17,8 @@
 
 //! Logic handling reading from Avro format at user level.
 use crate::{
-    AvroResult, Codec, Error, decode::{decode, decode_complete, decode_internal}, error::Details, from_value, headers::{HeaderBuilder, RabinFingerprintHeader}, resolving::ResolvedSchema, schema::{
-        AvroSchema, Names, Schema, SchemaWithSymbols, resolve_names, resolve_names_with_schemata
+    AvroResult, Codec, Error, decode::{decode, decode_complete}, error::Details, from_value, headers::{HeaderBuilder, RabinFingerprintHeader}, resolving::ResolvedSchema, schema::{
+        AvroSchema, Schema, SchemaWithSymbols
     }, types::Value, util
 };
 use log::warn;

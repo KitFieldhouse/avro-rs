@@ -24,7 +24,7 @@ use crate::{
     duration::Duration,
     error::Details,
     schema::{
-        DecimalSchema, EnumSchema, FixedSchema, Name, Namespace, RecordSchema,
+        DecimalSchema, EnumSchema, FixedSchema,
         Schema,
     },
     resolving::{ResolvedSchema},
@@ -32,7 +32,6 @@ use crate::{
     util::{safe_len, zag_i32, zag_i64},
 };
 use std::{
-    borrow::Borrow,
     collections::HashMap,
     io::{ErrorKind, Read},
 };

@@ -25,9 +25,8 @@ use crate::{
         validate_enum_symbol_name, validate_namespace, validate_record_field_name,
         validate_schema_name,
     },
-    resolving::ResolvedSchema
 };
-use digest::{typenum::Le, Digest};
+use digest::{Digest};
 use log::{debug, error, warn};
 use serde::{
     Deserialize, Serialize, Serializer,
@@ -2454,7 +2453,7 @@ impl AvroSchemaComponent for core::time::Duration {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{error::Details, rabin::Rabin, resolving::CompleteSchema};
+    use crate::{error::Details, rabin::Rabin, resolving::{CompleteSchema, ResolvedSchema}};
     use apache_avro_test_helper::{
         TestResult,
         logger::{assert_logged, assert_not_logged},
@@ -7149,7 +7148,7 @@ mod tests {
             ]
         }"#,
         )?;
-        let _resolved = ResolvedSchema::try_from(&schema.into())?;
+        let _resolved = ResolvedSchema::try_from(&schema)?;
 
         Ok(())
     }
@@ -7179,7 +7178,7 @@ mod tests {
             ]
         }"#,
         )?;
-        let _resolved = ResolvedSchema::try_from(&schema.into())?;
+        let _resolved = ResolvedSchema::try_from(&schema)?;
 
         Ok(())
     }
