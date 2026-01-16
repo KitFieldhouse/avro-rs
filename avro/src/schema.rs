@@ -89,6 +89,11 @@ impl SchemaWithSymbols{
         parser.parse_str(input)
     }
 
+    pub fn parse(value: &Value) -> AvroResult<SchemaWithSymbols>{
+        let parser = Parser::default();
+        parser.parse(value, &None)
+    }
+
     pub fn parse_array<const N: usize>(input: [impl AsRef<str>; N]) -> AvroResult<[SchemaWithSymbols; N]>{
         let input = input.into_iter();
         let mut parsed = Self::parse_list(input)?.into_iter();
