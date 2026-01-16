@@ -20,7 +20,7 @@
 use serde::Serialize;
 use serde_json::Value;
 
-use crate::schema::{self, derive, Aliases, ArraySchema, DecimalSchema, Documentation, EnumSchema, FixedSchema, LeafSchema, MapSchema, Name, RecordField, RecordFieldOrder, RecordSchema, Schema, SchemaKind, SchemaWithSymbols, UnionSchema, UuidSchema};
+use crate::schema::{self, Aliases, ArraySchema, DecimalSchema, Documentation, EnumSchema, FixedSchema, LeafSchema, MapSchema, Name, NamesRef, RecordField, RecordFieldOrder, RecordSchema, Schema, SchemaKind, SchemaWithSymbols, UnionSchema, UuidSchema, derive};
 use crate::{AvroResult, types};
 use crate::error::{Details,Error};
 use std::collections::BTreeMap;
@@ -204,6 +204,14 @@ impl ResolvedSchema{
                 return Err(Details::SchemaResolutionErrorWithMsg(name.as_ref().clone(), msg).into());
             }
         }
+    }
+
+    /// Gets the context_definitions as a `NameRef` map. This is for backwards
+    /// compatiblity and otherwise should be avoided as it copies `Names` and builds a new HashMap,
+    /// which is slow
+    /// TODO: This should be deprecated an replaced with proper methods in the future.
+    pub fn get_names<'a>(&'a self) -> NamesRef<'a>{
+        self.context_definitions.iter().map(|(key, value)| (key.as_ref().clone(), value.as_ref())).collect()
     }
 
     pub fn get_context_definitions(&self) -> &NameMap{
