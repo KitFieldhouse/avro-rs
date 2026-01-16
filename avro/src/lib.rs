@@ -1079,7 +1079,8 @@ mod tests {
         let writer_schema = Schema::parse_str(writer_raw_schema).unwrap();
         let reader_schema = Schema::parse_str(reader_raw_schema).unwrap();
         let mut writer = Writer::with_codec(&writer_schema, Vec::new(), Codec::Null).unwrap();
-        let mut record = Record::new(writer.schema()).unwrap();
+        let writer_schema = writer.schema().clone();
+        let mut record = Record::new(&writer_schema).unwrap();
         record.put("a", 27i64);
         record.put("b", "foo");
         writer.append(record).unwrap();
@@ -1120,7 +1121,8 @@ mod tests {
         "#;
         let schema = Schema::parse_str(raw_schema).unwrap();
         let mut writer = Writer::with_codec(&schema, Vec::new(), Codec::Null).unwrap();
-        let mut record = Record::new(writer.schema()).unwrap();
+        let writer_schema = writer.schema().clone();
+        let mut record = Record::new(&writer_schema).unwrap();
         record.put("a", 27i64);
         record.put("b", "foo");
         record.put("c", "clubs");
@@ -1162,7 +1164,8 @@ mod tests {
         "#;
         let writer_schema = Schema::parse_str(writer_raw_schema).unwrap();
         let mut writer = Writer::with_codec(&writer_schema, Vec::new(), Codec::Null).unwrap();
-        let mut record = Record::new(writer.schema()).unwrap();
+        let writer_schema = writer.schema().clone();
+        let mut record = Record::new(&writer_schema).unwrap();
         record.put("a", 27i64);
         record.put("b", "foo");
         record.put("c", "clubs");
