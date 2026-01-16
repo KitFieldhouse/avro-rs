@@ -77,12 +77,13 @@ fn decode_seq_len<R: Read>(reader: &mut R) -> AvroResult<usize> {
 /// This function will always convert the supplied schema into a ResolvedSchema which
 /// may cuase performance concerns. Consider using decode_complete.
 pub fn decode<R: Read>(schema: &Schema, reader: &mut R) -> AvroResult<Value> {
-    decode_complete(schema.clone().try_into()?, reader)
+    let resolved : ResolvedSchema = schema.clone().try_into()?;
+    decode_complete(&resolved, reader)
 }
 
 
 /// Decode a `Value` from avro format given its `Schema`.
-pub fn decode_complete<R: Read>(resolved_schema: ResolvedSchema, reader: &mut R) -> AvroResult<Value> {
+pub fn decode_complete<R: Read>(resolved_schema: &ResolvedSchema, reader: &mut R) -> AvroResult<Value> {
     decode_internal(ResolvedNode::new(&resolved_schema), reader)
 }
 
