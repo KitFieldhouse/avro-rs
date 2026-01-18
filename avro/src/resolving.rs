@@ -20,7 +20,7 @@
 use serde::Serialize;
 use serde_json::Value;
 
-use crate::schema::{self, Aliases, ArraySchema, DecimalSchema, Documentation, EnumSchema, FixedSchema, LeafSchema, MapSchema, Name, NamesRef, RecordField, RecordFieldOrder, RecordSchema, Schema, SchemaKind, SchemaWithSymbols, UnionSchema, UuidSchema, derive};
+use crate::schema::{Aliases, ArraySchema, DecimalSchema, Documentation, EnumSchema, FixedSchema, MapSchema, Name, NamesRef, RecordField, RecordFieldOrder, RecordSchema, Schema, SchemaKind, SchemaWithSymbols, UnionSchema, UuidSchema};
 use crate::{AvroResult, types};
 use crate::error::{Details,Error};
 use std::collections::BTreeMap;
@@ -407,13 +407,13 @@ impl From<&ResolvedNode<'_>> for SchemaKind {
 }
 
 impl<'a> ResolvedMap<'a>{
-    pub fn resolve_types(&self)->ResolvedNode{
+    pub fn resolve_types(&'a self)->ResolvedNode<'a>{
        ResolvedNode::from_schema(&self.types, self.root)
     }
 }
 
 impl<'a> ResolvedUnion<'a>{
-    pub fn resolve_schemas(&self)->Vec<ResolvedNode>{
+    pub fn resolve_schemas(&self)->Vec<ResolvedNode<'a>>{
         self.schemas.iter().map(|schema|{
             ResolvedNode::from_schema(schema, self.root)
         }).collect()
@@ -425,7 +425,7 @@ impl<'a> ResolvedUnion<'a>{
         self.union_schema
     }
 
-    pub fn structural_match_on_schema(&self, value: &types::Value) -> Option<(usize,ResolvedNode)>{
+    pub fn structural_match_on_schema(&'a self, value: &types::Value) -> Option<(usize,ResolvedNode<'a>)>{
         let value_schema_kind = SchemaKind::from(value);
         let resolved_nodes = self.resolve_schemas();
         if let Some(i) = self.get_variant_index(&value_schema_kind) {
@@ -448,13 +448,13 @@ impl<'a> ResolvedUnion<'a>{
 }
 
 impl<'a> ResolvedArray<'a>{
-    pub fn resolve_items(&self)->ResolvedNode{
+    pub fn resolve_items(&self)->ResolvedNode<'a>{
         ResolvedNode::from_schema(&self.items, self.root)
     }
 }
 
 impl<'a> ResolvedRecordField<'a>{
-    pub fn resolve_field(&self)->ResolvedNode{
+    pub fn resolve_field(&self)->ResolvedNode<'a>{
         ResolvedNode::from_schema(&self.schema, self.root)
     }
 
