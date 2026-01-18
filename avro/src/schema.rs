@@ -78,7 +78,16 @@ pub struct SchemaWithSymbols{
     /// an internal resolution and those that are internally unresolved.
     pub(crate) referenced_names: HashSet<Arc<Name>>, 
     /// The parseed schema tree
-    pub(crate) schema: Arc<Schema>
+    pub(crate) schema: Arc<Schema>,
+    /// Record fields that have defualt values that need to be 
+    /// resolved. 
+    /// TODO: Right now, we convert a json value in to an avro value and resolve 
+    ///       it against the field's schema twice, once to check if it's possible, and 
+    ///       then again when we actually want to use the defualt value. This could be improved in
+    ///       the future.
+    ///       In addition, we are copying the schema and value here, in SchemaWithSymbols. A
+    ///       better? way would be to just store some sort of reference into the schema and value.
+    pub(crate) field_defaults_to_resolve: Vec<(Schema, Value)>
 }
 
 
@@ -208,27 +217,30 @@ impl PartialEq for Schema {
 
 impl From<Schema> for SchemaWithSymbols{
     fn from(value: Schema) -> Self {
-        fn transform(schema: Schema, defined_names: &mut HashMap<Arc<Name>, Arc<Schema>>, referenced_names: &mut HashSet<Arc<Name>>) -> Schema {
+        fn transform(schema: Schema, defined_names: &mut HashMap<Arc<Name>, Arc<Schema>>, referenced_names: &mut HashSet<Arc<Name>>, field_defaults_to_resolve: &mut Vec<(Schema,Value)>) -> Schema {
             match schema {
                 Schema::Record(mut record_schema) => {
                     for field in &mut record_schema.fields{
-                        field.schema = transform(field.schema.clone(), defined_names, referenced_names);
+                        field.schema = transform(field.schema.clone(), defined_names, referenced_names, field_defaults_to_resolve);
+                        if let Some(value) = &field.default{
+                            field_defaults_to_resolve.push((field.schema.clone(), value.clone()));
+                        }
                     };
                     let name = Arc::clone(&record_schema.name);
                     defined_names.insert(Arc::clone(&name), Arc::new(Schema::Record(record_schema)));
                     Schema::Ref { name }
                 },
                 Schema::Array(mut array_schema) => {
-                    array_schema.items = Box::from(transform(*array_schema.items, defined_names, referenced_names));
+                    array_schema.items = Box::from(transform(*array_schema.items, defined_names, referenced_names, field_defaults_to_resolve));
                     Schema::Array(array_schema)
                 }
                 Schema::Map(mut map_schema) => {
-                    map_schema.types = Box::from(transform(*map_schema.types, defined_names, referenced_names));
+                    map_schema.types = Box::from(transform(*map_schema.types, defined_names, referenced_names, field_defaults_to_resolve));
                     Schema::Map(map_schema)
                 }
                 Schema::Union(mut union_schema) => {
                     for el_schema in &mut union_schema.schemas {
-                        *el_schema = transform(el_schema.clone(), defined_names, referenced_names);
+                        *el_schema = transform(el_schema.clone(), defined_names, referenced_names, field_defaults_to_resolve);
                     }
                     Schema::Union(union_schema)
                 },
@@ -248,12 +260,14 @@ impl From<Schema> for SchemaWithSymbols{
 
         let mut defined_names : HashMap<Arc<Name>, Arc<Schema>> = HashMap::new();
         let mut referenced_names : HashSet<Arc<Name>> = HashSet::new();
+        let mut field_defaults_to_resolve : Vec<(Schema, Value)> = Vec::new();
 
-        let schema = transform(value , &mut defined_names, &mut referenced_names);
+        let schema = transform(value , &mut defined_names, &mut referenced_names, &mut field_defaults_to_resolve);
 
         return Self{
             defined_names,
             referenced_names,
+            field_defaults_to_resolve,
             schema: Arc::new(schema)
         }
     }
@@ -636,14 +650,10 @@ impl RecordField {
             RecordSchemaParseLocation::FromField,
         )?;
 
-        let default = field.get("default").cloned();
-        Self::resolve_default_value(
-            &schema,
-            &name,
-            &enclosing_record.fullname(None),
-            &parser.parsed_schemas,
-            &default,
-        )?;
+        let default = field.get("default").cloned().and_then(|value|{
+            parser.field_defaults_to_resolve.push((schema.clone(), value.clone()));
+            Some(value)
+        });
 
         let aliases = field.get("aliases").and_then(|aliases| {
             aliases.as_array().map(|aliases| {
@@ -671,57 +681,6 @@ impl RecordField {
             custom_attributes: RecordField::get_field_custom_attributes(field, &schema),
             schema,
         })
-    }
-
-    fn resolve_default_value(
-        field_schema: &Schema,
-        field_name: &str,
-        record_name: &str,
-        names: &Names,
-        default: &Option<Value>,
-    ) -> AvroResult<()> {
-        if let Some(value) = default {
-            let avro_value = types::Value::from(value.clone());
-            match field_schema {
-                Schema::Union(union_schema) => {
-                    let schemas = &union_schema.schemas;
-                    let resolved = schemas.iter().any(|schema| {
-                        avro_value
-                            .to_owned()
-                            .resolve_internal(schema, names, &schema.namespace(), &None)
-                            .is_ok()
-                    });
-
-                    if !resolved {
-                        let schema: Option<&Schema> = schemas.first();
-                        return match schema {
-                            Some(first_schema) => Err(Details::GetDefaultUnion(
-                                SchemaKind::from(first_schema),
-                                types::ValueKind::from(avro_value),
-                            )
-                            .into()),
-                            None => Err(Details::EmptyUnion.into()),
-                        };
-                    }
-                }
-                _ => {
-                    let resolved = avro_value
-                        .resolve_internal(field_schema, names, &field_schema.namespace(), &None)
-                        .is_ok();
-
-                    if !resolved {
-                        return Err(Details::GetDefaultRecordField(
-                            field_name.to_string(),
-                            record_name.to_string(),
-                            field_schema.canonical_form(),
-                        )
-                        .into());
-                    }
-                }
-            };
-        }
-
-        Ok(())
     }
 
     fn get_field_custom_attributes(
@@ -998,7 +957,9 @@ struct Parser {
     defined_names: HashMap<Arc<Name>, ReservedSchema>,
     /// Keeps track of the names references by this schema, as well as where they are located
     /// in the schema tree
-    referenced_names: HashSet<Arc<Name>> 
+    referenced_names: HashSet<Arc<Name>>,
+    /// Keeps track of fields that have a defualt value we need to resolve against.
+    field_defaults_to_resolve: Vec<(Schema, Value)>
 }
 
 impl Schema {
@@ -1224,6 +1185,7 @@ impl Parser {
         }));
 
         Ok(SchemaWithSymbols{
+            field_defaults_to_resolve: self.field_defaults_to_resolve,
             defined_names, 
             referenced_names: self.referenced_names,
             schema: Arc::new(schema)

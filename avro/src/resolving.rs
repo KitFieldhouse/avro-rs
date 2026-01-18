@@ -105,11 +105,22 @@ impl ResolvedSchema{
 
         let mut definined_names : NameMap = HashMap::new();
 
-        let mut cloned_to_resolve = to_resolve.clone().into_iter();
-        Self::add_schemata(&mut definined_names, to_resolve.into_iter().chain(schemata_with_symbols), resolver)?;
+        Self::add_schemata(&mut definined_names, to_resolve.clone().into_iter().chain(schemata_with_symbols), resolver)?;
 
+        // check defualts for each with_symbol
+        for with_symbol in to_resolve.iter(){
+            for (schema, value) in &with_symbol.field_defaults_to_resolve{
+               let avro_value = types::Value::from(value.clone());
+               avro_value.resolve_internal(ResolvedNode::new(&ResolvedSchema{
+                   schema: Arc::new(schema.clone()), // TODO: this should be optimized away
+                   context_definitions: definined_names.clone()
+               }))?;
+            }
+        }
+
+        let mut to_resolve_iter = to_resolve.into_iter();
         Ok(std::array::from_fn(|_|{
-            let with_symbol = cloned_to_resolve.next().unwrap();
+            let with_symbol = to_resolve_iter.next().unwrap();
             ResolvedSchema{
                 schema: with_symbol.schema,
                 context_definitions: Self::copy_needed_definitions(&definined_names, with_symbol.referenced_names)
@@ -123,6 +134,17 @@ impl ResolvedSchema{
         let to_resolve : Vec<SchemaWithSymbols> = Vec::from_iter(to_resolve.into_iter());
 
         Self::add_schemata(&mut definined_names, to_resolve.iter().cloned().chain(schemata_with_symbols), resolver)?;
+
+        // check defualts for each with_symbol
+        for with_symbol in to_resolve.iter(){
+            for (schema, value) in &with_symbol.field_defaults_to_resolve{
+               let avro_value = types::Value::from(value.clone());
+               avro_value.resolve_internal(ResolvedNode::new(&ResolvedSchema{
+                   schema: Arc::new(schema.clone()), // TODO: this should be optimized away
+                   context_definitions: definined_names.clone()
+               }))?;
+            }
+        }
 
         Ok(to_resolve.into_iter().map(|schema_with_symbols|{ResolvedSchema{
                 schema: schema_with_symbols.schema,
