@@ -1724,7 +1724,7 @@ impl Parser {
 
         if let Some(ref value) = default {
             let resolved = types::Value::from(value.clone())
-                .resolve_enum(&symbols, &Some(value.to_string()), &None)
+                .resolve_enum(&symbols, &Some(value.to_string()))
                 .is_ok();
             if !resolved {
                 return Err(Details::GetEnumDefault {
