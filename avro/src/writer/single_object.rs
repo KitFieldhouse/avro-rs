@@ -25,10 +25,9 @@ use crate::encode::encode_internal;
 use crate::serde::ser_schema::{Config, SchemaAwareSerializer};
 use crate::util::is_human_readable;
 use crate::{
-    AvroResult, AvroSchema, Schema,
+    AvroResult, AvroSchema, Schema::{ResolvedNode, ResolvedSchema},
     error::Details,
     headers::{HeaderBuilder, RabinFingerprintHeader},
-    schema::ResolvedOwnedSchema,
     types::Value,
 };
 
@@ -37,7 +36,7 @@ use crate::{
 /// Writes all object bytes at once, and drains internal buffer
 pub struct GenericSingleObjectWriter {
     buffer: Vec<u8>,
-    resolved: ResolvedOwnedSchema,
+    resolved: ResolvedSchema,
 }
 
 impl GenericSingleObjectWriter {
@@ -60,7 +59,7 @@ impl GenericSingleObjectWriter {
 
         Ok(GenericSingleObjectWriter {
             buffer,
-            resolved: ResolvedOwnedSchema::try_from(schema.clone())?,
+            resolved: ResolvedSchema::try_from(schema.clone())?,
         })
     }
 
@@ -99,10 +98,10 @@ where
     T: AvroSchema,
 {
     #[builder(
-        with = |schema: Schema| -> Result<_, Error> { ResolvedOwnedSchema::new(schema) },
-        default = ResolvedOwnedSchema::new(T::get_schema()).expect("AvroSchema implementation should create valid schemas")
+        with = |schema: Schema| -> Result<_, Error> { ResolvedSchema::new(schema) },
+        default = ResolvedSchema::new(T::get_schema()).expect("AvroSchema implementation should create valid schemas")
     )]
-    resolved: ResolvedOwnedSchema,
+    resolved: ResolvedSchema,
     #[builder(
         default = RabinFingerprintHeader::from_schema(resolved.get_root_schema()).build_header(),
         with = |header_builder: impl HeaderBuilder| header_builder.build_header(),
@@ -132,7 +131,7 @@ where
     pub fn new() -> AvroResult<Self> {
         let schema = T::get_schema();
         let header = RabinFingerprintHeader::from_schema(&schema).build_header();
-        let resolved = ResolvedOwnedSchema::new(schema)?;
+        let resolved = ResolvedSchema::try_from(schema)?;
         // We don't use Self::new_with_header_builder as that would mean calling T::get_schema() twice
         Ok(Self {
             resolved,
@@ -145,7 +144,7 @@ where
 
     pub fn new_with_header_builder(header_builder: &impl HeaderBuilder) -> AvroResult<Self> {
         let header = header_builder.build_header();
-        let resolved = ResolvedOwnedSchema::new(T::get_schema())?;
+        let resolved = ResolvedSchema::try_from(T::get_schema())?;
         Ok(Self {
             resolved,
             header,
@@ -228,28 +227,23 @@ where
 }
 
 fn write_value_ref_owned_resolved<W: Write>(
-    resolved_schema: &ResolvedOwnedSchema,
+    resolved_schema: &ResolvedSchema,
     value: &Value,
     writer: &mut W,
 ) -> AvroResult<usize> {
-    let root_schema = resolved_schema.get_root_schema();
     if let Some(reason) = value.validate_internal(
-        root_schema,
-        resolved_schema.get_names(),
-        root_schema.namespace(),
+        ResolvedNode::new(resolved_schema)
     ) {
         return Err(Details::ValidationWithReason {
             value: value.clone(),
-            schema: root_schema.clone(),
+            schema: resolved_schema.schema.as_ref().clone(),
             reason,
         }
         .into());
     }
     encode_internal(
         value,
-        root_schema,
-        resolved_schema.get_names(),
-        root_schema.namespace(),
+        ResolvedNode::new(resolved_schema),
         writer,
     )
 }

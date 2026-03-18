@@ -20,7 +20,7 @@ use crate::{
     AvroResult, Codec, Error,
     encode::{encode, encode_internal, encode_to_vec},
     error::Details,
-    schema::{ResolvedSchema, Schema},
+    schema::{ResolvedSchema, ResolvedNode, Schema},
     serde::ser_schema::{Config, SchemaAwareSerializer},
     types::Value,
     util::is_human_readable,
@@ -42,7 +42,7 @@ const AVRO_OBJECT_HEADER: &[u8] = b"Obj\x01";
 pub struct Writer<'a, W: Write> {
     schema: &'a Schema,
     writer: W,
-    resolved_schema: ResolvedSchema<'a>,
+    resolved_schema: ResolvedSchema,
     codec: Codec,
     block_size: usize,
     buffer: Vec<u8>,
@@ -84,10 +84,10 @@ impl<'a, W: Write> Writer<'a, W> {
         /// intermediate buffer is used, but seeking through written data will be slower.
         map_array_target_block_size: Option<usize>,
     ) -> AvroResult<Self> {
-        let resolved_schema = if let Some(schemata) = schemata {
-            ResolvedSchema::try_from(schemata)?
+        let [resolved_schema] = if let Some(schemata) = schemata {
+            ResolvedSchema::from_schema_array([schema], schemata)?
         } else {
-            ResolvedSchema::try_from(schema)?
+            ResolvedSchema::from_schema_array_only([schema])?
         };
         Ok(Self {
             schema,
@@ -217,9 +217,7 @@ impl<'a, W: Write> Writer<'a, W> {
     /// written, then call [`flush`](Writer::flush).
     pub fn append_value_ref(&mut self, value: &Value) -> AvroResult<usize> {
         if let Some(reason) = value.validate_internal(
-            self.schema,
-            self.resolved_schema.get_names(),
-            self.schema.namespace(),
+            ResolvedNode::new(&self.resolved_schema),
         ) {
             return Err(Details::ValidationWithReason {
                 value: value.clone(),
@@ -262,9 +260,7 @@ impl<'a, W: Write> Writer<'a, W> {
         let n = self.maybe_write_header()?;
         encode_internal(
             value,
-            self.schema,
-            self.resolved_schema.get_names(),
-            self.schema.namespace(),
+            ResolvedNode::new(&self.resolved_schema),
             &mut self.buffer,
         )?;
 

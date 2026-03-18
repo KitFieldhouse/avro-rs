@@ -2018,7 +2018,7 @@ mod tests {
     #[test]
     fn avro_rs_414_serialize_char_as_fixed() -> TestResult {
         let schema = Schema::Fixed(FixedSchema {
-            name: Name::new("char")?,
+            name: Name::new("char")?.into(),
             aliases: None,
             doc: None,
             size: 4,
@@ -2049,7 +2049,7 @@ mod tests {
     #[test]
     fn avro_rs_414_serialize_i128_as_fixed() -> TestResult {
         let schema = Schema::Fixed(FixedSchema {
-            name: Name::new("i128")?,
+            name: Name::new("i128")?.into(),
             aliases: None,
             doc: None,
             size: 16,
@@ -2073,7 +2073,7 @@ mod tests {
     #[test]
     fn avro_rs_414_serialize_i128_as_fixed_wrong_name() -> TestResult {
         let schema = Schema::Fixed(FixedSchema {
-            name: Name::new("onehundredtwentyeight")?,
+            name: Name::new("onehundredtwentyeight")?.into(),
             aliases: None,
             doc: None,
             size: 16,
@@ -2094,7 +2094,7 @@ mod tests {
     #[test]
     fn avro_rs_414_serialize_i128_as_fixed_wrong_size() -> TestResult {
         let schema = Schema::Fixed(FixedSchema {
-            name: Name::new("i128")?,
+            name: Name::new("i128")?.into(),
             aliases: None,
             doc: None,
             size: 8,
@@ -2115,7 +2115,7 @@ mod tests {
     #[test]
     fn avro_rs_414_serialize_u128_as_fixed() -> TestResult {
         let schema = Schema::Fixed(FixedSchema {
-            name: Name::new("u128")?,
+            name: Name::new("u128")?.into(),
             aliases: None,
             doc: None,
             size: 16,
@@ -2139,7 +2139,7 @@ mod tests {
     #[test]
     fn avro_rs_414_serialize_u128_as_fixed_wrong_name() -> TestResult {
         let schema = Schema::Fixed(FixedSchema {
-            name: Name::new("onehundredtwentyeight")?,
+            name: Name::new("onehundredtwentyeight")?.into(),
             aliases: None,
             doc: None,
             size: 16,
@@ -2160,7 +2160,7 @@ mod tests {
     #[test]
     fn avro_rs_414_serialize_u128_as_fixed_wrong_size() -> TestResult {
         let schema = Schema::Fixed(FixedSchema {
-            name: Name::new("u128")?,
+            name: Name::new("u128")?.into(),
             aliases: None,
             doc: None,
             size: 8,

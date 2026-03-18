@@ -32,7 +32,7 @@ use crate::{
 };
 
 pub struct GenericSingleObjectReader {
-    write_schema: ResolvedOwnedSchema,
+    write_schema: ResolvedSchema,
     expected_header: Vec<u8>,
     human_readable: bool,
 }

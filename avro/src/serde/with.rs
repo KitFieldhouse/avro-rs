@@ -250,9 +250,9 @@ pub mod fixed {
         )
         .unwrap_or_else(|_| unreachable!("Name is valid"));
         if named_schemas.contains(&name) {
-            Schema::Ref { name }
+            Schema::Ref { name: name.into() }
         } else {
-            let schema = Schema::Fixed(FixedSchema::builder().name(name.clone()).size(N).build());
+            let schema = Schema::Fixed(FixedSchema::builder().name(name.clone().into()).size(N).build());
             named_schemas.insert(name);
             schema
         }

@@ -19,8 +19,10 @@ use std::{
     borrow::Borrow,
     collections::{BTreeMap, HashMap},
     fmt::{Debug, Formatter},
+    sync::Arc
 };
-
+use crate::types;
+use crate::{AvroResult, Error};
 use strum::IntoDiscriminant;
 
 use crate::{
@@ -41,7 +43,7 @@ pub struct UnionSchema {
     /// The indexes of unnamed types.
     ///
     /// Logical types have been reduced to their inner type.
-    variant_index: BTreeMap<SchemaKind, usize>,
+    pub(crate) variant_index: BTreeMap<SchemaKind, usize>,
     /// The indexes of named types.
     ///
     /// The names themselves aren't saved as they aren't used.
@@ -197,82 +199,6 @@ impl UnionSchema {
         self.variant_index.contains_key(&SchemaKind::Null)
     }
 
-    /// Optionally returns a reference to the schema matched by this value, as well as its position
-    /// within this union.
-    ///
-    /// Extra arguments:
-    /// - `known_schemata` - mapping between `Name` and `Schema` - if passed, additional external schemas would be used to resolve references.
-    pub fn find_schema_with_known_schemata<S: Borrow<Schema> + Debug>(
-        &self,
-        value: &types::Value,
-        known_schemata: Option<&HashMap<Name, S>>,
-        enclosing_namespace: NamespaceRef,
-    ) -> Option<(usize, &Schema)> {
-        let known_schemata_if_none = HashMap::new();
-        let known_schemata = known_schemata.unwrap_or(&known_schemata_if_none);
-        let ValueSchemaKind { unnamed, named } = Self::value_to_base_schemakind(value);
-        // Unnamed schema types can be looked up directly using the variant_index
-        let unnamed = unnamed
-            .and_then(|kind| self.variant_index.get(&kind).copied())
-            .map(|index| (index, &self.schemas[index]))
-            .and_then(|(index, schema)| {
-                let kind = schema.discriminant();
-                // Maps and arrays need to be checked if they actually match the value
-                if kind == SchemaKind::Map || kind == SchemaKind::Array {
-                    let namespace = schema.namespace().or(enclosing_namespace);
-
-                    // TODO: Do this without the clone
-                    value
-                        .clone()
-                        .resolve_internal(schema, known_schemata, namespace, &None)
-                        .ok()
-                        .map(|_| (index, schema))
-                } else {
-                    Some((index, schema))
-                }
-            });
-        let named = named.and_then(|kind| {
-            // Every named type needs to be checked against a value until one matches
-
-            self.named_index
-                .iter()
-                .copied()
-                .map(|i| (i, &self.schemas[i]))
-                .filter(|(_i, s)| {
-                    let s_kind = schema_to_base_schemakind(s);
-                    s_kind == kind || s_kind == SchemaKind::Ref
-                })
-                .find(|(_i, schema)| {
-                    let namespace = schema.namespace().or(enclosing_namespace);
-
-                    // TODO: Do this without the clone
-                    value
-                        .clone()
-                        .resolve_internal(schema, known_schemata, namespace, &None)
-                        .is_ok()
-                })
-        });
-
-        match (unnamed, named) {
-            (Some((u_i, _)), Some((n_i, _))) if u_i < n_i => unnamed,
-            (Some(_), Some(_)) => named,
-            (Some(_), None) => unnamed,
-            (None, Some(_)) => named,
-            (None, None) => {
-                // Slow path, check if value can be promoted to any of the types in the union
-                self.schemas.iter().enumerate().find(|(_i, schema)| {
-                    let namespace = schema.namespace().or(enclosing_namespace);
-
-                    // TODO: Do this without the clone
-                    value
-                        .clone()
-                        .resolve_internal(schema, known_schemata, namespace, &None)
-                        .is_ok()
-                })
-            }
-        }
-    }
-
     /// Convert a value to a [`SchemaKind`] stripping logical types to their base type.
     fn value_to_base_schemakind(value: &types::Value) -> ValueSchemaKind {
         let schemakind = SchemaKind::from(value);
@@ -342,7 +268,7 @@ impl PartialEq for UnionSchema {
 #[derive(Default, Debug)]
 pub struct UnionSchemaBuilder {
     schemas: Vec<Schema>,
-    names: HashMap<Name, usize>,
+    names: HashMap<Arc<Name>, usize>,
     variant_index: BTreeMap<SchemaKind, usize>,
 }
 
@@ -508,7 +434,7 @@ fn schema_to_base_schemakind(schema: &Schema) -> SchemaKind {
 mod tests {
     use super::*;
     use crate::error::{Details, Error};
-    use crate::schema::RecordSchema;
+    use crate::schema::{RecordSchema, ResolvedNode, ResolvedSchema};
     use crate::types::Value;
     use apache_avro_test_helper::TestResult;
 
@@ -679,9 +605,16 @@ mod tests {
                 .collect(),
         );
 
+        // KTODO, this test does not refactor in a nice way like the others...
+        let [rs] = ResolvedSchema::from_schema_array_only([&Schema::Union(union)])?;
+        let rn = ResolvedNode::new(&rs);
+        let resolved_union = match rn {
+            ResolvedNode::Union(res) => res,
+            _ => unreachable!()
+        };
+
         assert!(
-            union
-                .find_schema_with_known_schemata(&value, None::<&HashMap<Name, Schema>>, None)
+           resolved_union.structural_match_on_schema(&value)
                 .is_none()
         );
 
@@ -693,14 +626,25 @@ mod tests {
         let union = UnionSchema::new(vec![Schema::Long, Schema::Null])?;
         let value = Value::Int(42);
 
+        // KTODO, this test does not refactor in a nice way like the others...
+        let [rs] = ResolvedSchema::from_schema_array_only([&Schema::Union(union)])?;
+        let rn = ResolvedNode::new(&rs);
+        let resolved_union = match rn {
+            ResolvedNode::Union(res) => res,
+            _ => unreachable!()
+        };
+
+        let matched_union_branch = resolved_union.structural_match_on_schema(&value);
+
         assert_eq!(
-            union.find_schema_with_known_schemata(&value, None::<&HashMap<Name, Schema>>, None),
-            Some((0, &Schema::Long))
+            matched_union_branch,
+            Some((0, ResolvedNode::Long))
         );
 
         Ok(())
     }
 
+    // KTODO: this refactors horribly....
     #[test]
     fn avro_rs_489_find_schema_with_known_schemata_uuid_vs_fixed() -> TestResult {
         let uuid = Schema::parse_str(
@@ -714,9 +658,24 @@ mod tests {
         let union = UnionSchema::new(vec![uuid.clone(), Schema::Null])?;
         let value = Value::Fixed(16, vec![0; 16]);
 
+        let [union_rs] = ResolvedSchema::from_schema_array_only([&Schema::Union(union)])?;
+        let union_rs = ResolvedNode::new(&union_rs);
+
+        let resolved_union = match union_rs {
+            ResolvedNode::Union(res) => res,
+            _ => unreachable!()
+        };
+
+        let matched_union_branch = resolved_union.structural_match_on_schema(&value);
+
+        let uuid = match uuid {
+            Schema::Uuid(uuid) => uuid,
+            _ => unreachable!()
+        };
+
         assert_eq!(
-            union.find_schema_with_known_schemata(&value, None::<&HashMap<Name, Schema>>, None),
-            Some((0, &uuid))
+            matched_union_branch,
+            Some((0, ResolvedNode::Uuid(&uuid)))
         );
 
         Ok(())
