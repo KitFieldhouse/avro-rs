@@ -236,7 +236,7 @@ fn write_value_ref_owned_resolved<W: Write>(
     ) {
         return Err(Details::ValidationWithReason {
             value: value.clone(),
-            schema: resolved_schema.schema.as_ref().clone(),
+            schema: resolved_schema.stub.as_ref().clone(),
             reason,
         }
         .into());

@@ -85,9 +85,9 @@ impl<'a, W: Write> Writer<'a, W> {
         map_array_target_block_size: Option<usize>,
     ) -> AvroResult<Self> {
         let [resolved_schema] = if let Some(schemata) = schemata {
-            ResolvedSchema::from_schema_array([schema], schemata)?
+            ResolvedSchema::resolve().additional(schemata)?.build_array([schema])?
         } else {
-            ResolvedSchema::from_schema_array_only([schema])?
+            ResolvedSchema::resolve().build_array([schema])?
         };
         Ok(Self {
             schema,

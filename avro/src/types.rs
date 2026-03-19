@@ -1341,26 +1341,6 @@ mod tests {
                 false,
                 r#"Invalid value: Record([("unknown_field_name", Null)]) for schema: Record(RecordSchema { name: Name { name: "record_name", .. }, fields: [RecordField { name: "field_name", schema: Int, .. }], .. }). Reason: There is no schema field for field 'unknown_field_name'"#,
             ),
-            (
-                Value::Record(vec![("field_name".to_string(), Value::Null)]),
-                Schema::Record(RecordSchema {
-                    name: Name::new("record_name")?.into(),
-                    aliases: None,
-                    doc: None,
-                    fields: vec![
-                        RecordField::builder()
-                            .name("field_name".to_string())
-                            .schema(Schema::Ref {
-                                name: Name::new("missing")?.into(),
-                            })
-                            .build(),
-                    ],
-                    lookup: [("field_name".to_string(), 0)].iter().cloned().collect(),
-                    attributes: Default::default(),
-                }),
-                false,
-                r#"Invalid value: Record([("field_name", Null)]) for schema: Record(RecordSchema { name: Name { name: "record_name", .. }, fields: [RecordField { name: "field_name", schema: Ref { name: Name { name: "missing", .. } }, .. }], .. }). Reason: Unresolved schema reference: 'Name { name: "missing", .. }'. Parsed names: []"#,
-            ),
         ];
 
         for (value, schema, valid, expected_err_message) in value_schema_valid.into_iter() {
@@ -1382,17 +1362,17 @@ mod tests {
 
     #[test]
     fn validate_fixed() -> TestResult {
-        let schema = Schema::Fixed(FixedSchema {
+        let schema = ResolvedSchema::try_from(Schema::Fixed(FixedSchema {
             size: 4,
             name: Name::new("some_fixed")?.into(),
             aliases: None,
             doc: None,
             attributes: Default::default(),
-        });
+        }))?;
 
-        assert!(Value::Fixed(4, vec![0, 0, 0, 0]).validate(&schema));
+        assert!(Value::Fixed(4, vec![0, 0, 0, 0]).validate_against_resolved(&schema));
         let value = Value::Fixed(5, vec![0, 0, 0, 0, 0]);
-        assert!(!value.validate(&schema));
+        assert!(!value.validate_against_resolved(&schema));
         assert_logged(
             format!(
                 "Invalid value: {:?} for schema: {:?}. Reason: {}",
@@ -1401,9 +1381,9 @@ mod tests {
             .as_str(),
         );
 
-        assert!(Value::Bytes(vec![0, 0, 0, 0]).validate(&schema));
+        assert!(Value::Bytes(vec![0, 0, 0, 0]).validate_against_resolved(&schema));
         let value = Value::Bytes(vec![0, 0, 0, 0, 0]);
-        assert!(!value.validate(&schema));
+        assert!(!value.validate_against_resolved(&schema));
         assert_logged(
             format!(
                 "Invalid value: {:?} for schema: {:?}. Reason: {}",
@@ -1430,12 +1410,13 @@ mod tests {
             default: None,
             attributes: Default::default(),
         });
+        let [schema] = ResolvedSchema::resolve().build_array([&schema])?;
 
-        assert!(Value::Enum(0, "spades".to_string()).validate(&schema));
-        assert!(Value::String("spades".to_string()).validate(&schema));
+        assert!(Value::Enum(0, "spades".to_string()).validate_against_resolved(&schema));
+        assert!(Value::String("spades".to_string()).validate_against_resolved(&schema));
 
         let value = Value::Enum(1, "spades".to_string());
-        assert!(!value.validate(&schema));
+        assert!(!value.validate_against_resolved(&schema));
         assert_logged(
             format!(
                 "Invalid value: {:?} for schema: {:?}. Reason: {}",
@@ -1445,7 +1426,7 @@ mod tests {
         );
 
         let value = Value::Enum(1000, "spades".to_string());
-        assert!(!value.validate(&schema));
+        assert!(!value.validate_against_resolved(&schema));
         assert_logged(
             format!(
                 "Invalid value: {:?} for schema: {:?}. Reason: {}",
@@ -1455,7 +1436,7 @@ mod tests {
         );
 
         let value = Value::String("lorem".to_string());
-        assert!(!value.validate(&schema));
+        assert!(!value.validate_against_resolved(&schema));
         assert_logged(
             format!(
                 "Invalid value: {:?} for schema: {:?}. Reason: {}",
@@ -1477,9 +1458,10 @@ mod tests {
             default: None,
             attributes: Default::default(),
         });
+        let [other_schema] = ResolvedSchema::resolve().build_array([&other_schema])?;
 
         let value = Value::Enum(0, "spades".to_string());
-        assert!(!value.validate(&other_schema));
+        assert!(!value.validate_against_resolved(&other_schema));
         assert_logged(
             format!(
                 "Invalid value: {:?} for schema: {:?}. Reason: {}",
@@ -1505,7 +1487,7 @@ mod tests {
         //      }
         //    ]
         // }
-        let schema = Schema::Record(RecordSchema {
+        let raw_schema = Schema::Record(RecordSchema {
             name: Name::new("some_record")?.into(),
             aliases: None,
             doc: None,
@@ -1538,36 +1520,46 @@ mod tests {
             attributes: Default::default(),
         });
 
+        let schema = ResolvedSchema::try_from(&raw_schema)?;
+
         assert!(
             Value::Record(vec![
                 ("a".to_string(), Value::Long(42i64)),
                 ("b".to_string(), Value::String("foo".to_string())),
             ])
-            .validate(&schema)
+            .validate_against_resolved(&schema)
         );
 
         let value = Value::Record(vec![
             ("b".to_string(), Value::String("foo".to_string())),
             ("a".to_string(), Value::Long(42i64)),
         ]);
-        assert!(value.validate(&schema));
+        assert!(value.validate_against_resolved(&schema));
 
         let value = Value::Record(vec![
             ("a".to_string(), Value::Boolean(false)),
             ("b".to_string(), Value::String("foo".to_string())),
         ]);
-        assert!(!value.validate(&schema));
+        assert!(!value.validate_against_resolved(&schema));
         assert_logged(
-            r#"Invalid value: Record([("a", Boolean(false)), ("b", String("foo"))]) for schema: Record(RecordSchema { name: Name { name: "some_record", .. }, fields: [RecordField { name: "a", schema: Long, .. }, RecordField { name: "b", schema: String, .. }, RecordField { name: "c", default: Null, schema: Union(UnionSchema { schemas: [Null, Int] }), .. }], .. }). Reason: Unsupported value-schema combination! Value: Boolean(false), schema: Long"#,
+            &format!(
+                "Invalid value: {:?} for schema: {:?}. Reason: {}",
+                value, schema,
+                "Unsupported value-schema combination! Value: Boolean(false), schema: Long"
+            ).to_string(),
         );
 
         let value = Value::Record(vec![
             ("a".to_string(), Value::Long(42i64)),
             ("c".to_string(), Value::String("foo".to_string())),
         ]);
-        assert!(!value.validate(&schema));
+        assert!(!value.validate_against_resolved(&schema));
         assert_logged(
-            r#"Invalid value: Record([("a", Long(42)), ("c", String("foo"))]) for schema: Record(RecordSchema { name: Name { name: "some_record", .. }, fields: [RecordField { name: "a", schema: Long, .. }, RecordField { name: "b", schema: String, .. }, RecordField { name: "c", default: Null, schema: Union(UnionSchema { schemas: [Null, Int] }), .. }], .. }). Reason: Could not find matching type in union"#,
+            &format!(
+                "Invalid value: {:?} for schema: {:?}. Reason: {}",
+                value, schema,
+                "Could not find matching type in union"
+            ).to_string(),
         );
         assert_not_logged(
             r#"Invalid value: String("foo") for schema: Int. Reason: Unsupported value-schema combination"#,
@@ -1577,9 +1569,13 @@ mod tests {
             ("a".to_string(), Value::Long(42i64)),
             ("d".to_string(), Value::String("foo".to_string())),
         ]);
-        assert!(!value.validate(&schema));
+        assert!(!value.validate_against_resolved(&schema));
         assert_logged(
-            r#"Invalid value: Record([("a", Long(42)), ("d", String("foo"))]) for schema: Record(RecordSchema { name: Name { name: "some_record", .. }, fields: [RecordField { name: "a", schema: Long, .. }, RecordField { name: "b", schema: String, .. }, RecordField { name: "c", default: Null, schema: Union(UnionSchema { schemas: [Null, Int] }), .. }], .. }). Reason: There is no schema field for field 'd'"#,
+            &format!(
+                "Invalid value: {:?} for schema: {:?}. Reason: {}",
+                value, schema,
+                "There is no schema field for field 'd'"
+            ).to_string(),
         );
 
         let value = Value::Record(vec![
@@ -1588,9 +1584,13 @@ mod tests {
             ("c".to_string(), Value::Null),
             ("d".to_string(), Value::Null),
         ]);
-        assert!(!value.validate(&schema));
+        assert!(!value.validate_against_resolved(&schema));
         assert_logged(
-            r#"Invalid value: Record([("a", Long(42)), ("b", String("foo")), ("c", Null), ("d", Null)]) for schema: Record(RecordSchema { name: Name { name: "some_record", .. }, fields: [RecordField { name: "a", schema: Long, .. }, RecordField { name: "b", schema: String, .. }, RecordField { name: "c", default: Null, schema: Union(UnionSchema { schemas: [Null, Int] }), .. }], .. }). Reason: The value's records length (4) is greater than the schema's (3 fields)"#,
+            &format!(
+                "Invalid value: {:?} for schema: {:?}. Reason: {}",
+                value, schema,
+                "The value's records length (4) is greater than the schema's (3 fields)"
+            ).to_string(),
         );
 
         assert!(
@@ -1602,23 +1602,28 @@ mod tests {
                 .into_iter()
                 .collect()
             )
-            .validate(&schema)
+            .validate_against_resolved(&schema)
         );
 
-        assert!(
-            !Value::Map(
+        let value = Value::Map(
                 vec![("d".to_string(), Value::Long(123_i64)),]
                     .into_iter()
                     .collect()
-            )
-            .validate(&schema)
-        );
-        assert_logged(
-            r#"Invalid value: Map({"d": Long(123)}) for schema: Record(RecordSchema { name: Name { name: "some_record", .. }, fields: [RecordField { name: "a", schema: Long, .. }, RecordField { name: "b", schema: String, .. }, RecordField { name: "c", default: Null, schema: Union(UnionSchema { schemas: [Null, Int] }), .. }], .. }). Reason: Field with name '"a"' is not a member of the map items
-Field with name '"b"' is not a member of the map items"#,
+            );
+
+        assert!(
+            !value.validate_against_resolved(&schema)
         );
 
-        let union_schema = Schema::Union(UnionSchema::new(vec![Schema::Null, schema])?);
+        assert_logged(
+            &format!(
+                "Invalid value: {:?} for schema: {:?}. Reason: {}",
+                value, schema,
+                "Field with name '\"a\"' is not a member of the map items\nField with name '\"b\"' is not a member of the map items"
+            ).to_string(),
+        );
+
+        let union_schema = ResolvedSchema::try_from(Schema::Union(UnionSchema::new(vec![Schema::Null, raw_schema])?))?;
 
         assert!(
             Value::Union(
@@ -1628,7 +1633,7 @@ Field with name '"b"' is not a member of the map items"#,
                     ("b".to_string(), Value::String("foo".to_string())),
                 ]))
             )
-            .validate(&union_schema)
+            .validate_against_resolved(&union_schema)
         );
 
         assert!(
@@ -1643,7 +1648,7 @@ Field with name '"b"' is not a member of the map items"#,
                     .collect()
                 ))
             )
-            .validate(&union_schema)
+            .validate_against_resolved(&union_schema)
         );
 
         Ok(())
@@ -2994,7 +2999,7 @@ Field with name '"b"' is not a member of the map items"#,
 
         let avro_value = Value::try_from(value)?;
 
-        let [rs] = ResolvedSchema::from_str_array([main_schema], vec![referenced_schema])?;
+        let [rs] = ResolvedSchema::resolve().additional(vec![referenced_schema])?.build_array([main_schema])?;
 
         let resolve_result = avro_value.clone().resolve_against_resolved(rs);
 
@@ -3031,7 +3036,7 @@ Field with name '"b"' is not a member of the map items"#,
 
         let avro_value = Value::try_from(value)?;
 
-        let [rs] = ResolvedSchema::from_str_array([main_schema], vec![referenced_enum, referenced_record])?;
+        let [rs] = ResolvedSchema::resolve().additional(vec![referenced_enum, referenced_record])?.build_array([main_schema])?;
 
         let resolve_result = avro_value.resolve_against_resolved(rs.clone())?;
 

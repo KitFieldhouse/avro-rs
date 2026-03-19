@@ -77,10 +77,8 @@ impl<'a, R: Read> Reader<'a, R> {
         schemata: Option<Vec<&'a Schema>>,
         #[builder(default = is_human_readable())] human_readable: bool,
     ) -> AvroResult<Reader<'a, R>> {
-        let schemata =
-            schemata.unwrap_or_else(|| reader_schema.map(|rs| vec![rs]).unwrap_or_default());
-
-        let block = Block::new(reader, schemata, human_readable)?;
+        let schemata = schemata.unwrap_or_else(|| vec![]);
+        let block = Block::new(reader, schemata,human_readable)?;
         let mut reader = Reader {
             block,
             reader_schema,

@@ -115,6 +115,16 @@ pub enum Details {
         reason: String,
     },
 
+    /// Describes error when performing defualt validation:
+    #[error("Provided defualt for field {field_name:?} in record {record_name:?} with schema {schema:?} does not validate with the provided defualt value {value:?}. Reason: {reason}")]
+    DefaultValidationWithReason {
+        record_name: String,
+        field_name: String,
+        value: serde_json::Value,
+        schema: Schema,
+        reason: String
+    },
+
     #[error(
         "Unable to allocate {desired} bytes (maximum allowed: {maximum}). Change the limit using `apache_avro::util::max_allocation_bytes`"
     )]
@@ -422,6 +432,11 @@ pub enum Details {
     #[error("No `type` in complex type")]
     GetComplexTypeField,
 
+    #[error("Given json value {value:?} is not allowed to be the value of \"type\" when interpreting a JSON object as a schema. Only builtin type names as strings are allowed")]
+    JsonSchemaTypeNotAllowed{
+        value: serde_json::Value,
+    },
+
     #[error("No `type` in record field")]
     GetRecordFieldTypeField,
 
@@ -639,6 +654,11 @@ pub enum Details {
     #[error("Custom resolver did not return schema definition for expected name. Expected name: {0:?}, Names
         received from resolver: {1:?}")]
     CustomSchemaResolverMismatch(Name, Vec<Name>),
+
+    /// Wrapper error for a collection of errors when attempting to resolve several schema
+    /// KTODO: check on this!
+    #[error("Error when resolving: error messages: {0:?}")]
+    ResolvedSchemaCreationError(Vec<Error>),
 
     #[error("The file metadata is already flushed.")]
     FileHeaderAlreadyWritten,
