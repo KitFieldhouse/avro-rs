@@ -701,7 +701,7 @@ impl<'s, 'w, W: Write> SerializeMap for MapOrRecordSerializer<'s, 'w, W> {
 #[cfg(test)]
 mod tests {
     use std::{
-        collections::{BTreeMap, HashMap},
+        collections::BTreeMap,
         marker::PhantomData,
     };
 
@@ -913,8 +913,7 @@ mod tests {
 
     #[test]
     fn test_serialize_double() -> TestResult {
-        let schema = Schema::Double;
-        let names = HashMap::new();
+        let schema = ResolvedSchema::builder().build_one(Schema::Double)?;
 
         assert_serialize(
             -14.1f64,
@@ -942,8 +941,7 @@ mod tests {
 
     #[test]
     fn test_serialize_bytes() -> TestResult {
-        let schema = Schema::Bytes;
-        let names = HashMap::new();
+        let schema = ResolvedSchema::builder().build_one(Schema::Bytes)?;
 
         assert_serialize(
             Bytes::new(&[12, 3, 7, 91, 4]),
@@ -981,8 +979,7 @@ mod tests {
 
     #[test]
     fn test_serialize_string() -> TestResult {
-        let schema = Schema::String;
-        let names = HashMap::new();
+        let schema = ResolvedSchema::builder().build_one(Schema::String)?;
 
         assert_serialize('a', &schema,  &[2, b'a']);
         assert_serialize("test", &schema,  &[8, b't', b'e', b's', b't']);
@@ -1017,7 +1014,7 @@ mod tests {
 
     #[test]
     fn test_serialize_record() -> TestResult {
-        let schema = Schema::parse_str(
+        let schema = ResolvedSchema::parse_str(
             r#"{
             "type": "record",
             "name": "TestRecord",
@@ -1041,8 +1038,6 @@ mod tests {
             foo_string_field: String,
             bar_int_field: i32,
         }
-
-        let names = HashMap::new();
 
         let good_record = GoodTestRecord {
             string_field: String::from("test"),
@@ -1079,15 +1074,13 @@ mod tests {
 
     #[test]
     fn test_serialize_empty_record() -> TestResult {
-        let schema = Schema::parse_str(
+        let schema = ResolvedSchema::parse_str(
             r#"{
             "type": "record",
             "name": "EmptyRecord",
             "fields": []
         }"#,
         )?;
-
-        let names = HashMap::new();
 
         #[derive(Serialize)]
         struct EmptyRecord;
@@ -1128,7 +1121,7 @@ mod tests {
 
     #[test]
     fn test_serialize_enum() -> TestResult {
-        let schema = Schema::parse_str(
+        let schema = ResolvedSchema::parse_str(
             r#"{
             "type": "enum",
             "name": "Suit",
@@ -1145,8 +1138,6 @@ mod tests {
             Clubs,
         }
 
-        let names = HashMap::new();
-
         assert_serialize(Suit::Spades, &schema,  &[0]);
         assert_serialize(Suit::Hearts, &schema,  &[2]);
         assert_serialize(Suit::Diamonds, &schema,  &[4]);
@@ -1162,14 +1153,12 @@ mod tests {
 
     #[test]
     fn test_serialize_array() -> TestResult {
-        let schema = Schema::parse_str(
+        let schema = ResolvedSchema::parse_str(
             r#"{
             "type": "array",
             "items": "long"
         }"#,
         )?;
-
-        let names = HashMap::new();
 
         assert_serialize(
             vec![10i64, 5, 400],
@@ -1187,14 +1176,12 @@ mod tests {
 
     #[test]
     fn test_serialize_map() -> TestResult {
-        let schema = Schema::parse_str(
+        let schema = ResolvedSchema::parse_str(
             r#"{
             "type": "map",
             "values": "long"
         }"#,
         )?;
-
-        let names = HashMap::new();
 
         let mut map: BTreeMap<String, i64> = BTreeMap::new();
         map.insert(String::from("item1"), 10);
@@ -1222,7 +1209,7 @@ mod tests {
 
     #[test]
     fn test_serialize_nullable_union() -> TestResult {
-        let schema = Schema::parse_str(
+        let schema = ResolvedSchema::parse_str(
             r#"["null", "long"]"#,
         )?;
 
@@ -1231,8 +1218,6 @@ mod tests {
             Null,
             Long(i64),
         }
-
-        let names = HashMap::new();
 
         assert_serialize(Some(10i64), &schema,  &[2, 20]);
         assert_serialize(None::<i64>, &schema,  &[0]);
@@ -1251,7 +1236,7 @@ mod tests {
 
     #[test]
     fn test_serialize_union() -> TestResult {
-        let schema = Schema::parse_str(
+        let schema = ResolvedSchema::parse_str(
             r#"["null", "long", "string"]"#,
         )?;
 
@@ -1261,8 +1246,6 @@ mod tests {
             Long(i64),
             Str(String),
         }
-
-        let names = HashMap::new();
         assert_serialize(LongOrString::Null, &schema,  &[0]);
         assert_serialize(LongOrString::Long(400), &schema,  &[2, 160, 6]);
         assert_serialize(
@@ -1284,15 +1267,13 @@ mod tests {
 
     #[test]
     fn test_serialize_fixed() -> TestResult {
-        let schema = Schema::parse_str(
+        let schema = ResolvedSchema::parse_str(
             r#"{
             "type": "fixed",
             "size": 8,
             "name": "LongVal"
         }"#,
         )?;
-
-        let names = HashMap::new();
 
         assert_serialize(
             Bytes::new(&[10, 124, 31, 97, 14, 201, 3, 88]),
@@ -1320,7 +1301,7 @@ mod tests {
 
     #[test]
     fn test_serialize_decimal_bytes() -> TestResult {
-        let schema = Schema::parse_str(
+        let schema = ResolvedSchema::parse_str(
             r#"{
             "type": "bytes",
             "logicalType": "decimal",
@@ -1328,8 +1309,6 @@ mod tests {
             "scale": 2
         }"#,
         )?;
-
-        let names = HashMap::new();
 
         let val = Decimal::from(&[251, 155]);
         assert_serialize(val, &schema,  &[4, 251, 155]);
@@ -1344,7 +1323,7 @@ mod tests {
 
     #[test]
     fn test_serialize_decimal_fixed() -> TestResult {
-        let schema = Schema::parse_str(
+        let schema = ResolvedSchema::parse_str(
             r#"{
             "type": "fixed",
             "name": "FixedDecimal",
@@ -1354,8 +1333,6 @@ mod tests {
             "scale": 2
         }"#,
         )?;
-
-        let names = HashMap::new();
 
         let val = Decimal::from(&[0, 0, 0, 0, 0, 0, 251, 155]);
         assert_serialize(val, &schema,  &[0, 0, 0, 0, 0, 0, 251, 155]);
@@ -1370,14 +1347,12 @@ mod tests {
 
     #[test]
     fn test_serialize_bigdecimal() -> TestResult {
-        let schema = Schema::parse_str(
+        let schema = ResolvedSchema::parse_str(
             r#"{
             "type": "bytes",
             "logicalType": "big-decimal"
         }"#,
         )?;
-
-        let names = HashMap::new();
 
         #[derive(Serialize)]
         #[serde(transparent)]
@@ -1398,7 +1373,7 @@ mod tests {
 
     #[test]
     fn test_serialize_uuid() -> TestResult {
-        let schema = Schema::parse_str(
+        let schema = ResolvedSchema::parse_str(
             r#"{
             "type": "fixed",
             "size": 16,
@@ -1409,7 +1384,6 @@ mod tests {
 
         // Uuid serialize implementation changes based on this value
         assert!(!crate::util::is_human_readable());
-        let names = HashMap::new();
 
         let uuid = "8c28da81-238c-4326-bddd-4e3d00cc5099".parse::<Uuid>()?;
 
@@ -1431,14 +1405,12 @@ mod tests {
 
     #[test]
     fn test_serialize_date() -> TestResult {
-        let schema = Schema::parse_str(
+        let schema = ResolvedSchema::parse_str(
             r#"{
             "type": "int",
             "logicalType": "date"
         }"#,
         )?;
-
-        let names = HashMap::new();
 
         assert_serialize(100u8, &schema,  &[200, 1]);
         assert_serialize(1000u16, &schema,  &[208, 15]);
@@ -1460,14 +1432,12 @@ mod tests {
 
     #[test]
     fn test_serialize_time_millis() -> TestResult {
-        let schema = Schema::parse_str(
+        let schema = ResolvedSchema::parse_str(
             r#"{
             "type": "int",
             "logicalType": "time-millis"
         }"#,
         )?;
-
-        let names = HashMap::new();
 
         assert_serialize(100u8, &schema,  &[200, 1]);
         assert_serialize(1000u16, &schema,  &[208, 15]);
@@ -1489,14 +1459,12 @@ mod tests {
 
     #[test]
     fn test_serialize_time_micros() -> TestResult {
-        let schema = Schema::parse_str(
+        let schema = ResolvedSchema::parse_str(
             r#"{
             "type": "long",
             "logicalType": "time-micros"
         }"#,
         )?;
-
-        let names = HashMap::new();
 
         assert_serialize(10000u32, &schema,  &[160, 156, 1]);
         assert_serialize(10000i64, &schema,  &[160, 156, 1]);
@@ -1536,14 +1504,12 @@ mod tests {
             ("micros", "Micros"),
             ("nanos", "Nanos"),
         ] {
-            let schema = Schema::parse_str(&format!(
+            let schema = ResolvedSchema::parse_str(&format!(
                 r#"{{
                 "type": "long",
                 "logicalType": "timestamp-{precision}"
             }}"#
             ))?;
-
-            let names = HashMap::new();
 
             assert_serialize(10000u32, &schema,  &[160, 156, 1]);
             assert_serialize(10000i64, &schema,  &[160, 156, 1]);
@@ -1589,7 +1555,7 @@ mod tests {
 
     #[test]
     fn test_serialize_duration() -> TestResult {
-        let schema = Schema::parse_str(
+        let schema = ResolvedSchema::parse_str(
             r#"{
             "type": "fixed",
             "size": 12,
@@ -1597,8 +1563,6 @@ mod tests {
             "logicalType": "duration"
         }"#,
         )?;
-
-        let names = HashMap::new();
 
         let duration = Duration::new(Months::new(3), Days::new(2), Millis::new(1200));
         assert_serialize(
@@ -1617,7 +1581,7 @@ mod tests {
 
     #[test]
     fn test_serialize_recursive_record() -> TestResult {
-        let schema = Schema::parse_str(
+        let schema = ResolvedSchema::parse_str(
             r#"{
             "type": "record",
             "name": "TestRecord",
@@ -1641,7 +1605,6 @@ mod tests {
         }
 
         assert!(!crate::util::is_human_readable());
-        let rs = ResolvedSchema::try_from(&schema)?;
 
         let good_record = TestRecord {
             string_field: String::from("test"),
@@ -1657,7 +1620,6 @@ mod tests {
         assert_serialize(
             good_record,
             &schema,
-            rs.get_names(),
             &[
                 8, 116, 101, 115, 116, 20, 140, 40, 218, 129, 35, 140, 67, 38, 189, 221, 78, 61, 0,
                 204, 80, 152, 2, 20, 105, 110, 110, 101, 114, 95, 116, 101, 115, 116, 200, 1, 140,
@@ -1670,7 +1632,7 @@ mod tests {
 
     #[test]
     fn avro_rs_337_serialize_union_record_variant() -> TestResult {
-        let schema = Schema::parse_str(
+        let schema = ResolvedSchema::parse_str(
             r#"{
             "type": "record",
             "name": "TestRecord",
@@ -1716,8 +1678,6 @@ mod tests {
             bar: String,
         }
 
-        let rs = ResolvedSchema::try_from(&schema)?;
-
         let foo_record = TestRecord {
             inner_union: InnerUnion::InnerVariantFoo(InnerRecordFoo {
                 foo: String::from("foo"),
@@ -1726,7 +1686,6 @@ mod tests {
         assert_serialize(
             foo_record,
             &schema,
-            rs.get_names(),
             &[0, 6, b'f', b'o', b'o'],
         );
         let bar_record = TestRecord {
@@ -1737,20 +1696,18 @@ mod tests {
         assert_serialize(
             bar_record,
             &schema,
-            rs.get_names(),
             &[2, 6, b'b', b'a', b'r'],
         );
         let int_record = TestRecord {
             inner_union: InnerUnion::IntField(1),
         };
-        assert_serialize(int_record, &schema, rs.get_names(), &[4, 2]);
+        assert_serialize(int_record, &schema, &[4, 2]);
         let string_record = TestRecord {
             inner_union: InnerUnion::StringField(String::from("string")),
         };
         assert_serialize(
             string_record,
             &schema,
-            rs.get_names(),
             &[6, 12, b's', b't', b'r', b'i', b'n', b'g'],
         );
         Ok(())
@@ -1758,7 +1715,7 @@ mod tests {
 
     #[test]
     fn avro_rs_337_serialize_option_union_record_variant() -> TestResult {
-        let schema = Schema::parse_str(
+        let schema = ResolvedSchema::parse_str(
             r#"{
             "type": "record",
             "name": "TestRecord",
@@ -1790,14 +1747,11 @@ mod tests {
             IntField(i32),
         }
 
-        let rs = ResolvedSchema::try_from(&schema)?;
-
         // Flattening a Option into the underlying union is NOT supported
         let null_record = TestRecord { inner_union: None };
         assert_serialize_err(
             null_record,
             &schema,
-            rs.get_names(),
             r#"Failed to serialize field 'innerUnion' of record RecordSchema { name: Name { name: "TestRecord", .. }, fields: [RecordField { name: "innerUnion", schema: Union(UnionSchema { schemas: [Null, Record(RecordSchema { name: Name { name: "innerRecordFoo", .. }, fields: [RecordField { name: "foo", schema: String, .. }], .. }), Record(RecordSchema { name: Name { name: "innerRecordBar", .. }, fields: [RecordField { name: "bar", schema: String, .. }], .. }), Int, String] }), .. }], .. }: Failed to serialize value of type `none`: Expected Schema::Union([Schema::Null, _])"#,
         );
         let foo_record = TestRecord {
@@ -1806,7 +1760,6 @@ mod tests {
         assert_serialize_err(
             foo_record,
             &schema,
-            rs.get_names(),
             r#"Failed to serialize field 'innerUnion' of record RecordSchema { name: Name { name: "TestRecord", .. }, fields: [RecordField { name: "innerUnion", schema: Union(UnionSchema { schemas: [Null, Record(RecordSchema { name: Name { name: "innerRecordFoo", .. }, fields: [RecordField { name: "foo", schema: String, .. }], .. }), Record(RecordSchema { name: Name { name: "innerRecordBar", .. }, fields: [RecordField { name: "bar", schema: String, .. }], .. }), Int, String] }), .. }], .. }: Failed to serialize value of type `some`: Expected Schema::Union([Schema::Null, _])"#,
         );
         Ok(())
@@ -1822,7 +1775,7 @@ mod tests {
             d: f64,
             e: i64,
         }
-        let schema = Schema::parse_str(
+        let schema = ResolvedSchema::parse_str(
             r#"
         {
             "type":"record",
@@ -1853,7 +1806,6 @@ mod tests {
         "#,
         )?;
 
-        let names = HashMap::new();
         let foo = Foo {
             a: "Hello".into(),
             b: "World".into(),
@@ -1876,8 +1828,7 @@ mod tests {
 
     #[test]
     fn avro_rs_414_serialize_char_as_string() -> TestResult {
-        let schema = Schema::String;
-        let names = HashMap::new();
+        let schema = ResolvedSchema::builder().build_one(Schema::String)?;
 
         assert_serialize('a', &schema,  &[2, b'a']);
 
@@ -1886,8 +1837,7 @@ mod tests {
 
     #[test]
     fn avro_rs_414_serialize_char_as_bytes() -> TestResult {
-        let schema = Schema::Bytes;
-        let names = HashMap::new();
+        let schema = ResolvedSchema::builder().build_one(Schema::Bytes)?;
 
         assert_serialize_err(
             'a',
@@ -1900,14 +1850,13 @@ mod tests {
 
     #[test]
     fn avro_rs_414_serialize_char_as_fixed() -> TestResult {
-        let schema = Schema::Fixed(FixedSchema {
+        let schema = ResolvedSchema::builder().build_one(Schema::Fixed(FixedSchema {
             name: Name::new("char")?.into(),
             aliases: None,
             doc: None,
             size: 4,
             attributes: Default::default(),
-        });
-        let names = HashMap::new();
+        }))?;
 
         assert_serialize_err(
             'a',
@@ -1920,8 +1869,7 @@ mod tests {
 
     #[test]
     fn avro_rs_414_serialize_emoji_char_as_string() -> TestResult {
-        let schema = Schema::String;
-        let names = HashMap::new();
+        let schema = ResolvedSchema::builder().build_one(Schema::String)?;
 
         assert_serialize('👹', &schema,  &[8, 240, 159, 145, 185]);
 
@@ -1930,14 +1878,13 @@ mod tests {
 
     #[test]
     fn avro_rs_414_serialize_i128_as_fixed() -> TestResult {
-        let schema = Schema::Fixed(FixedSchema {
+        let schema = ResolvedSchema::builder().build_one(Schema::Fixed(FixedSchema {
             name: Name::new("i128")?.into(),
             aliases: None,
             doc: None,
             size: 16,
             attributes: Default::default(),
-        });
-        let names = HashMap::new();
+        }))?;
 
         assert_serialize(
             i128::MAX,
@@ -1953,14 +1900,13 @@ mod tests {
 
     #[test]
     fn avro_rs_414_serialize_i128_as_fixed_wrong_name() -> TestResult {
-        let schema = Schema::Fixed(FixedSchema {
+        let schema = ResolvedSchema::builder().build_one(Schema::Fixed(FixedSchema {
             name: Name::new("onehundredtwentyeight")?.into(),
             aliases: None,
             doc: None,
             size: 16,
             attributes: Default::default(),
-        });
-        let names = HashMap::new();
+        }))?;
 
         assert_serialize_err(
             i128::MAX,
@@ -1973,14 +1919,13 @@ mod tests {
 
     #[test]
     fn avro_rs_414_serialize_i128_as_fixed_wrong_size() -> TestResult {
-        let schema = Schema::Fixed(FixedSchema {
+        let schema = ResolvedSchema::builder().build_one(Schema::Fixed(FixedSchema {
             name: Name::new("i128")?.into(),
             aliases: None,
             doc: None,
             size: 8,
             attributes: Default::default(),
-        });
-        let names = HashMap::new();
+        }))?;
 
         assert_serialize_err(
             i128::MAX,
@@ -1993,14 +1938,13 @@ mod tests {
 
     #[test]
     fn avro_rs_414_serialize_u128_as_fixed() -> TestResult {
-        let schema = Schema::Fixed(FixedSchema {
+        let schema = ResolvedSchema::builder().build_one(Schema::Fixed(FixedSchema {
             name: Name::new("u128")?.into(),
             aliases: None,
             doc: None,
             size: 16,
             attributes: Default::default(),
-        });
-        let names = HashMap::new();
+        }))?;
 
         assert_serialize(
             u128::MAX,
@@ -2016,14 +1960,13 @@ mod tests {
 
     #[test]
     fn avro_rs_414_serialize_u128_as_fixed_wrong_name() -> TestResult {
-        let schema = Schema::Fixed(FixedSchema {
+        let schema = ResolvedSchema::builder().build_one(Schema::Fixed(FixedSchema {
             name: Name::new("onehundredtwentyeight")?.into(),
             aliases: None,
             doc: None,
             size: 16,
             attributes: Default::default(),
-        });
-        let names = HashMap::new();
+        }))?;
 
         assert_serialize_err(
             u128::MAX,
@@ -2036,14 +1979,13 @@ mod tests {
 
     #[test]
     fn avro_rs_414_serialize_u128_as_fixed_wrong_size() -> TestResult {
-        let schema = Schema::Fixed(FixedSchema {
+        let schema = ResolvedSchema::builder().build_one(Schema::Fixed(FixedSchema {
             name: Name::new("u128")?.into(),
             aliases: None,
             doc: None,
             size: 8,
             attributes: Default::default(),
-        });
-        let names = HashMap::new();
+        }))?;
 
         assert_serialize_err(
             u128::MAX,
@@ -2056,13 +1998,12 @@ mod tests {
 
     #[test]
     fn avro_rs_421_serialize_bytes_union_of_fixed() -> TestResult {
-        let schema = Schema::parse_str(
+        let schema = ResolvedSchema::parse_str(
             r#"[
             { "name": "fixed4", "type": "fixed", "size": 4 },
             { "name": "fixed8", "type": "fixed", "size": 8 }
         ]"#,
         )?;
-        let names = HashMap::new();
         assert_serialize(Bytes::new(&[0, 1, 2, 3]), &schema,  &[0, 0, 1, 2, 3]);
         assert_serialize(
             Bytes::new(&[4, 5, 6, 7, 8, 9, 10, 11]),
