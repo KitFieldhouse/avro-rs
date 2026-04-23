@@ -26,30 +26,30 @@ use super::{Config, SchemaAwareSerializer, union::UnionSerializer};
 use crate::{
     Error, Schema,
     error::Details,
-    schema::{RecordSchema, UnionSchema},
+    schema::{RecordSchema, ResolvedNode, ResolvedRecord, ResolvedUnion, UnionSchema},
 };
 
 #[expect(
     private_interfaces,
     reason = "One{,Union}TupleSerializer should not be used directly"
 )]
-pub enum TupleSerializer<'s, 'w, W: Write, S: Borrow<Schema>> {
+pub enum TupleSerializer<'s, 'w, W: Write> {
     Unit(usize),
-    One(OneTupleSerializer<'s, 'w, W, S>),
+    One(OneTupleSerializer<'s, 'w, W>),
     /// This exists because we can't create a `&Schema::Union` from a `&UnionSchema`
-    OneUnion(OneUnionTupleSerializer<'s, 'w, W, S>),
-    Many(ManyTupleSerializer<'s, 'w, W, S>),
+    OneUnion(OneUnionTupleSerializer<'s, 'w, W>),
+    Many(ManyTupleSerializer<'s, 'w, W>),
 }
 
-impl<'s, 'w, W: Write, S: Borrow<Schema>> TupleSerializer<'s, 'w, W, S> {
+impl<'s, 'w, W: Write> TupleSerializer<'s, 'w, W> {
     pub fn unit(bytes_written: Option<usize>) -> Self {
         Self::Unit(bytes_written.unwrap_or(0))
     }
 
     pub fn one(
         writer: &'w mut W,
-        schema: &'s Schema,
-        config: Config<'s, S>,
+        schema: ResolvedNode<'s>,
+        config: Config,
         bytes_written: Option<usize>,
     ) -> Self {
         Self::One(OneTupleSerializer::new(
@@ -60,14 +60,14 @@ impl<'s, 'w, W: Write, S: Borrow<Schema>> TupleSerializer<'s, 'w, W, S> {
         ))
     }
 
-    pub fn one_union(writer: &'w mut W, union: &'s UnionSchema, config: Config<'s, S>) -> Self {
+    pub fn one_union(writer: &'w mut W, union: ResolvedUnion<'s>, config: Config) -> Self {
         Self::OneUnion(OneUnionTupleSerializer::new(writer, union, config))
     }
 
     pub fn many(
         writer: &'w mut W,
-        schema: &'s RecordSchema,
-        config: Config<'s, S>,
+        schema: ResolvedRecord<'s>,
+        config: Config,
         bytes_written: Option<usize>,
     ) -> Self {
         Self::Many(ManyTupleSerializer::new(
@@ -79,7 +79,7 @@ impl<'s, 'w, W: Write, S: Borrow<Schema>> TupleSerializer<'s, 'w, W, S> {
     }
 }
 
-impl<'s, 'w, W: Write, S: Borrow<Schema>> SerializeTuple for TupleSerializer<'s, 'w, W, S> {
+impl<'s, 'w, W: Write> SerializeTuple for TupleSerializer<'s, 'w, W> {
     type Ok = usize;
     type Error = Error;
 
@@ -109,19 +109,19 @@ impl<'s, 'w, W: Write, S: Borrow<Schema>> SerializeTuple for TupleSerializer<'s,
     }
 }
 
-pub struct ManyTupleSerializer<'s, 'w, W: Write, S: Borrow<Schema>> {
+pub struct ManyTupleSerializer<'s, 'w, W: Write> {
     writer: &'w mut W,
-    schema: &'s RecordSchema,
-    config: Config<'s, S>,
+    schema: ResolvedRecord<'s>,
+    config: Config,
     field_position: usize,
     bytes_written: usize,
 }
 
-impl<'s, 'w, W: Write, S: Borrow<Schema>> ManyTupleSerializer<'s, 'w, W, S> {
+impl<'s, 'w, W: Write> ManyTupleSerializer<'s, 'w, W> {
     pub fn new(
         writer: &'w mut W,
-        schema: &'s RecordSchema,
-        config: Config<'s, S>,
+        schema: ResolvedRecord<'s>,
+        config: Config,
         bytes_written: Option<usize>,
     ) -> Self {
         Self {
@@ -134,7 +134,7 @@ impl<'s, 'w, W: Write, S: Borrow<Schema>> ManyTupleSerializer<'s, 'w, W, S> {
     }
 }
 
-impl<'s, 'w, W: Write, S: Borrow<Schema>> SerializeTuple for ManyTupleSerializer<'s, 'w, W, S> {
+impl<'s, 'w, W: Write> SerializeTuple for ManyTupleSerializer<'s, 'w, W> {
     type Ok = usize;
     type Error = Error;
 
@@ -142,15 +142,17 @@ impl<'s, 'w, W: Write, S: Borrow<Schema>> SerializeTuple for ManyTupleSerializer
     where
         T: ?Sized + Serialize,
     {
-        let schema = &self
+        let schema = self
             .schema
             .fields
             .get(self.field_position)
             .ok_or_else(|| Details::SerializeRecordUnknownFieldIndex {
                 position: self.field_position,
-                schema: self.schema.clone(),
+                schema: ResolvedNode::Record(self.schema.clone())
+                    .get_resolved()
+                    .unravel(),
             })?
-            .schema;
+            .resolve_field();
         self.bytes_written += value.serialize(SchemaAwareSerializer::new(
             self.writer,
             schema,
@@ -173,8 +175,7 @@ impl<'s, 'w, W: Write, S: Borrow<Schema>> SerializeTuple for ManyTupleSerializer
     }
 }
 
-impl<'s, 'w, W: Write, S: Borrow<Schema>> SerializeTupleStruct
-    for ManyTupleSerializer<'s, 'w, W, S>
+impl<'s, 'w, W: Write> SerializeTupleStruct for ManyTupleSerializer<'s, 'w, W>
 {
     type Ok = usize;
     type Error = Error;
@@ -191,8 +192,8 @@ impl<'s, 'w, W: Write, S: Borrow<Schema>> SerializeTupleStruct
     }
 }
 
-impl<'s, 'w, W: Write, S: Borrow<Schema>> SerializeTupleVariant
-    for ManyTupleSerializer<'s, 'w, W, S>
+impl<'s, 'w, W: Write> SerializeTupleVariant
+    for ManyTupleSerializer<'s, 'w, W>
 {
     type Ok = usize;
     type Error = Error;
@@ -209,18 +210,18 @@ impl<'s, 'w, W: Write, S: Borrow<Schema>> SerializeTupleVariant
     }
 }
 
-struct OneTupleSerializer<'s, 'w, W: Write, S: Borrow<Schema>> {
+struct OneTupleSerializer<'s, 'w, W: Write> {
     writer: &'w mut W,
-    schema: &'s Schema,
-    config: Config<'s, S>,
+    schema: ResolvedNode<'s>,
+    config: Config,
     bytes_written: usize,
 }
 
-impl<'s, 'w, W: Write, S: Borrow<Schema>> OneTupleSerializer<'s, 'w, W, S> {
+impl<'s, 'w, W: Write> OneTupleSerializer<'s, 'w, W> {
     pub fn new(
         writer: &'w mut W,
-        schema: &'s Schema,
-        config: Config<'s, S>,
+        schema: ResolvedNode<'s>,
+        config: Config,
         bytes_written: Option<usize>,
     ) -> Self {
         Self {
@@ -232,7 +233,7 @@ impl<'s, 'w, W: Write, S: Borrow<Schema>> OneTupleSerializer<'s, 'w, W, S> {
     }
 }
 
-impl<'s, 'w, W: Write, S: Borrow<Schema>> SerializeTuple for OneTupleSerializer<'s, 'w, W, S> {
+impl<'s, 'w, W: Write> SerializeTuple for OneTupleSerializer<'s, 'w, W> {
     type Ok = usize;
     type Error = Error;
 
@@ -240,15 +241,15 @@ impl<'s, 'w, W: Write, S: Borrow<Schema>> SerializeTuple for OneTupleSerializer<
     where
         T: ?Sized + Serialize,
     {
-        match self.schema {
-            Schema::Union(union) => {
+        match &self.schema {
+            ResolvedNode::Union(union) => {
                 self.bytes_written +=
-                    value.serialize(UnionSerializer::new(self.writer, union, self.config))?;
+                    value.serialize(UnionSerializer::new(self.writer, union.clone(), self.config))?;
             }
             schema => {
                 self.bytes_written += value.serialize(SchemaAwareSerializer::new(
                     self.writer,
-                    schema,
+                    schema.clone(),
                     self.config,
                 )?)?;
             }
@@ -261,15 +262,15 @@ impl<'s, 'w, W: Write, S: Borrow<Schema>> SerializeTuple for OneTupleSerializer<
     }
 }
 
-struct OneUnionTupleSerializer<'s, 'w, W: Write, S: Borrow<Schema>> {
+struct OneUnionTupleSerializer<'s, 'w, W: Write> {
     writer: &'w mut W,
-    union: &'s UnionSchema,
-    config: Config<'s, S>,
+    union: ResolvedUnion<'s>,
+    config: Config,
     bytes_written: usize,
 }
 
-impl<'s, 'w, W: Write, S: Borrow<Schema>> OneUnionTupleSerializer<'s, 'w, W, S> {
-    pub fn new(writer: &'w mut W, union: &'s UnionSchema, config: Config<'s, S>) -> Self {
+impl<'s, 'w, W: Write> OneUnionTupleSerializer<'s, 'w, W> {
+    pub fn new(writer: &'w mut W, union: ResolvedUnion<'s>, config: Config) -> Self {
         Self {
             writer,
             union,
@@ -279,7 +280,7 @@ impl<'s, 'w, W: Write, S: Borrow<Schema>> OneUnionTupleSerializer<'s, 'w, W, S> 
     }
 }
 
-impl<'s, 'w, W: Write, S: Borrow<Schema>> SerializeTuple for OneUnionTupleSerializer<'s, 'w, W, S> {
+impl<'s, 'w, W: Write> SerializeTuple for OneUnionTupleSerializer<'s, 'w, W> {
     type Ok = usize;
     type Error = Error;
 
@@ -288,7 +289,7 @@ impl<'s, 'w, W: Write, S: Borrow<Schema>> SerializeTuple for OneUnionTupleSerial
         T: ?Sized + Serialize,
     {
         self.bytes_written +=
-            value.serialize(UnionSerializer::new(self.writer, self.union, self.config))?;
+            value.serialize(UnionSerializer::new(self.writer, self.union.clone(), self.config))?;
         Ok(())
     }
 

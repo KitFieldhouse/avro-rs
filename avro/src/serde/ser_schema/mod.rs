@@ -21,6 +21,7 @@ mod block;
 mod record;
 mod tuple;
 mod union;
+mod avro_value;
 
 use std::{borrow::Borrow, collections::HashMap, io::Write};
 
@@ -30,23 +31,19 @@ use serde::{Serialize, Serializer, ser::SerializeMap};
 use serde_json::Value::Bool;
 use tuple::{ManyTupleSerializer, TupleSerializer};
 use union::UnionSerializer;
+use avro_value::AvroValueSerialize;
 
 use crate::{
     Error, Schema,
     error::Details,
     schema::{
-        DecimalSchema, InnerDecimalSchema, MapSchema, Name, RecordSchema, SchemaKind, UnionSchema,
-        UuidSchema,
+        DecimalSchema, InnerDecimalSchema, MapSchema, Name, RecordSchema, ResolvedMap, ResolvedNode, ResolvedRecord, SchemaKind, UnionSchema, UuidSchema
     },
     util::{zig_i32, zig_i64},
 };
 
-pub struct Config<'s, S: Borrow<Schema>> {
-    /// Any references in the schema will be resolved using this map.
-    ///
-    /// This map is not allowed to contain any [`Schema::Ref`], the serializer is allowed to panic
-    /// in that case.
-    pub names: &'s HashMap<Name, S>,
+#[derive(Copy, Clone)]
+pub struct Config {
     /// At what block size to start a new block (for arrays and maps).
     ///
     /// This is a minimum value, the block size will always be larger than this except for the last
@@ -61,45 +58,21 @@ pub struct Config<'s, S: Borrow<Schema>> {
     pub human_readable: bool,
 }
 
-impl<'s, S: Borrow<Schema>> Config<'s, S> {
-    /// Get the schema for this name.
-    fn get_schema(&self, name: &Name) -> Result<&'s Schema, Error> {
-        self.names
-            .get(name)
-            .map(Borrow::borrow)
-            .ok_or_else(|| Details::SchemaResolutionError(name.clone()).into())
-    }
-}
-
-// This needs to be implemented manually as the derive puts a bound on `S`
-// which is unnecessary as a reference is always Copy.
-impl<'s, S: Borrow<Schema>> Copy for Config<'s, S> {}
-impl<'s, S: Borrow<Schema>> Clone for Config<'s, S> {
-    fn clone(&self) -> Self {
-        *self
-    }
-}
-
-pub struct SchemaAwareSerializer<'s, 'w, W: Write, S: Borrow<Schema>> {
+pub struct SchemaAwareSerializer<'s, 'w, W: Write> {
     writer: &'w mut W,
     /// The schema of the data being serialized.
     ///
-    /// This schema is guaranteed to not be a [`Schema::Ref`].
-    schema: &'s Schema,
-    config: Config<'s, S>,
+    /// [`ResolvedNode`] for walking the schema tree
+    schema: ResolvedNode<'s>,
+    config: Config,
 }
 
-impl<'s, 'w, W: Write, S: Borrow<Schema>> SchemaAwareSerializer<'s, 'w, W, S> {
+impl<'s, 'w, W: Write> SchemaAwareSerializer<'s, 'w, W> {
     pub fn new(
         writer: &'w mut W,
-        schema: &'s Schema,
-        config: Config<'s, S>,
+        schema: ResolvedNode<'s>,
+        config: Config,
     ) -> Result<Self, Error> {
-        let schema = if let Schema::Ref { name } = schema {
-            config.get_schema(name)?
-        } else {
-            schema
-        };
         Ok(Self {
             writer,
             schema,
@@ -111,23 +84,23 @@ impl<'s, 'w, W: Write, S: Borrow<Schema>> SchemaAwareSerializer<'s, 'w, W, S> {
         Error::new(Details::SerializeValueWithSchema {
             value_type: ty,
             value: error.into(),
-            schema: self.schema.clone(),
+            schema: self.schema
+                .get_resolved()
+                .unravel(),
         })
     }
 
     /// Create a new serializer with the existing writer and config.
     ///
     /// This will resolve the schema if it is a reference.
-    fn with_different_schema(mut self, schema: &'s Schema) -> Result<Self, Error> {
-        self.schema = if let Schema::Ref { name } = schema {
-            self.config.get_schema(name)?
-        } else {
-            schema
-        };
+    // KTODO: can i get rid of this?
+    fn with_different_schema(mut self, schema: ResolvedNode<'s>) -> Result<Self, Error> {
+        self.schema = schema;
         Ok(self)
     }
 
     /// Get the schema at the given index of the union, resolving references.
+    // KTODO: can i get rid of this?
     fn get_resolved_union_variant(
         &self,
         union: &'s UnionSchema,
@@ -145,8 +118,8 @@ impl<'s, 'w, W: Write, S: Borrow<Schema>> SchemaAwareSerializer<'s, 'w, W, S> {
     /// This also handles [`Schema::Union`].
     fn checked_write_int(self, original_ty: &'static str, v: i32) -> Result<usize, Error> {
         match self.schema {
-            Schema::Int | Schema::Date | Schema::TimeMillis => zig_i32(v, self.writer),
-            Schema::Union(union) => UnionSerializer::new(self.writer, union, self.config)
+            ResolvedNode::Int | ResolvedNode::Date | ResolvedNode::TimeMillis => zig_i32(v, self.writer),
+            ResolvedNode::Union(union) => UnionSerializer::new(self.writer, union, self.config)
                 .checked_write_int(original_ty, v),
             _ => Err(self.error(
                 original_ty,
@@ -161,14 +134,14 @@ impl<'s, 'w, W: Write, S: Borrow<Schema>> SchemaAwareSerializer<'s, 'w, W, S> {
     /// This also handles [`Schema::Union`].
     fn checked_write_long(self, original_ty: &'static str, v: i64) -> Result<usize, Error> {
         match self.schema {
-            Schema::Long | Schema::TimeMicros | Schema::TimestampMillis | Schema::TimestampMicros
-            | Schema::TimestampNanos | Schema::LocalTimestampMillis | Schema::LocalTimestampMicros
-            | Schema::LocalTimestampNanos => {
+            ResolvedNode::Long | ResolvedNode::TimeMicros | ResolvedNode::TimestampMillis | ResolvedNode::TimestampMicros
+            | ResolvedNode::TimestampNanos | ResolvedNode::LocalTimestampMillis | ResolvedNode::LocalTimestampMicros
+            | ResolvedNode::LocalTimestampNanos => {
                 zig_i64(v, self.writer)
             }
-            Schema::Union(union) => UnionSerializer::new(self.writer, union, self.config).checked_write_long(original_ty, v),
+            ResolvedNode::Union(union) => UnionSerializer::new(self.writer, union, self.config).checked_write_long(original_ty, v),
             _ => {
-                Err(self.error(original_ty, "Expected Schema::Long | Schema::TimeMicros | Schema::{,Local}Timestamp{Millis,Micros,Nanos}"))
+                Err(self.error(original_ty, "Expected ResolvedNode::Long | ResolvedNode::TimeMicros | ResolvedNode::{,Local}Timestamp{Millis,Micros,Nanos}"))
             }
         }
     }
@@ -209,22 +182,22 @@ impl<'s, 'w, W: Write, S: Borrow<Schema>> SchemaAwareSerializer<'s, 'w, W, S> {
 /// is not public, there is no way for a user to obtain that value.
 static SERIALIZING_SCHEMA_DEFAULT: &str = "This value is compared by pointer value";
 
-impl<'s, 'w, W: Write, S: Borrow<Schema>> Serializer for SchemaAwareSerializer<'s, 'w, W, S> {
+impl<'s, 'w, W: Write> Serializer for SchemaAwareSerializer<'s, 'w, W> {
     /// The amount of bytes written.
     type Ok = usize;
     type Error = Error;
-    type SerializeSeq = BlockSerializer<'s, 'w, W, S>;
-    type SerializeTuple = TupleSerializer<'s, 'w, W, S>;
-    type SerializeTupleStruct = ManyTupleSerializer<'s, 'w, W, S>;
-    type SerializeTupleVariant = ManyTupleSerializer<'s, 'w, W, S>;
-    type SerializeMap = MapOrRecordSerializer<'s, 'w, W, S>;
-    type SerializeStruct = RecordSerializer<'s, 'w, W, S>;
-    type SerializeStructVariant = RecordSerializer<'s, 'w, W, S>;
+    type SerializeSeq = BlockSerializer<'s, 'w, W>;
+    type SerializeTuple = TupleSerializer<'s, 'w, W>;
+    type SerializeTupleStruct = ManyTupleSerializer<'s, 'w, W>;
+    type SerializeTupleVariant = ManyTupleSerializer<'s, 'w, W>;
+    type SerializeMap = MapOrRecordSerializer<'s, 'w, W>;
+    type SerializeStruct = RecordSerializer<'s, 'w, W>;
+    type SerializeStructVariant = RecordSerializer<'s, 'w, W>;
 
     fn serialize_bool(mut self, v: bool) -> Result<Self::Ok, Self::Error> {
         match self.schema {
-            Schema::Boolean => self.write_array([v as u8]),
-            Schema::Union(union) => {
+            ResolvedNode::Boolean => self.write_array([v as u8]),
+            ResolvedNode::Union(union) => {
                 UnionSerializer::new(self.writer, union, self.config).serialize_bool(v)
             }
             _ => Err(self.error("bool", "Expected Schema::Boolean")),
@@ -249,10 +222,10 @@ impl<'s, 'w, W: Write, S: Borrow<Schema>> Serializer for SchemaAwareSerializer<'
 
     fn serialize_i128(mut self, v: i128) -> Result<Self::Ok, Self::Error> {
         match self.schema {
-            Schema::Fixed(fixed) if fixed.size == 16 && fixed.name.name() == "i128" => {
+            ResolvedNode::Fixed(fixed) if fixed.size == 16 && fixed.name.name() == "i128" => {
                 self.write_array(v.to_le_bytes())
             }
-            Schema::Union(union) => {
+            ResolvedNode::Union(union) => {
                 UnionSerializer::new(self.writer, union, self.config).serialize_i128(v)
             }
             _ => Err(self.error("i128", r#"Expected Schema::Fixed(name: "i128", size: 16)"#)),
@@ -273,10 +246,10 @@ impl<'s, 'w, W: Write, S: Borrow<Schema>> Serializer for SchemaAwareSerializer<'
 
     fn serialize_u64(mut self, v: u64) -> Result<Self::Ok, Self::Error> {
         match self.schema {
-            Schema::Fixed(fixed) if fixed.size == 8 && fixed.name.name() == "u64" => {
+            ResolvedNode::Fixed(fixed) if fixed.size == 8 && fixed.name.name() == "u64" => {
                 self.write_array(v.to_le_bytes())
             }
-            Schema::Union(union) => {
+            ResolvedNode::Union(union) => {
                 UnionSerializer::new(self.writer, union, self.config).serialize_u64(v)
             }
             _ => Err(self.error("u64", r#"Expected Schema::Fixed(name: "u64", size: 8)"#)),
@@ -285,10 +258,10 @@ impl<'s, 'w, W: Write, S: Borrow<Schema>> Serializer for SchemaAwareSerializer<'
 
     fn serialize_u128(mut self, v: u128) -> Result<Self::Ok, Self::Error> {
         match self.schema {
-            Schema::Fixed(fixed) if fixed.size == 16 && fixed.name.name() == "u128" => {
+            ResolvedNode::Fixed(fixed) if fixed.size == 16 && fixed.name.name() == "u128" => {
                 self.write_array(v.to_le_bytes())
             }
-            Schema::Union(union) => {
+            ResolvedNode::Union(union) => {
                 UnionSerializer::new(self.writer, union, self.config).serialize_u128(v)
             }
             _ => Err(self.error("u128", r#"Expected Schema::Fixed(name: "u128", size: 16)"#)),
@@ -297,8 +270,8 @@ impl<'s, 'w, W: Write, S: Borrow<Schema>> Serializer for SchemaAwareSerializer<'
 
     fn serialize_f32(mut self, v: f32) -> Result<Self::Ok, Self::Error> {
         match self.schema {
-            Schema::Float => self.write_array(v.to_le_bytes()),
-            Schema::Union(union) => {
+            ResolvedNode::Float => self.write_array(v.to_le_bytes()),
+            ResolvedNode::Union(union) => {
                 UnionSerializer::new(self.writer, union, self.config).serialize_f32(v)
             }
             _ => Err(self.error("f32", "Expected Schema::Float")),
@@ -307,8 +280,8 @@ impl<'s, 'w, W: Write, S: Borrow<Schema>> Serializer for SchemaAwareSerializer<'
 
     fn serialize_f64(mut self, v: f64) -> Result<Self::Ok, Self::Error> {
         match self.schema {
-            Schema::Double => self.write_array(v.to_le_bytes()),
-            Schema::Union(union) => {
+            ResolvedNode::Double => self.write_array(v.to_le_bytes()),
+            ResolvedNode::Union(union) => {
                 UnionSerializer::new(self.writer, union, self.config).serialize_f64(v)
             }
             _ => Err(self.error("f64", "Expected Schema::Double")),
@@ -318,53 +291,53 @@ impl<'s, 'w, W: Write, S: Borrow<Schema>> Serializer for SchemaAwareSerializer<'
     fn serialize_char(mut self, v: char) -> Result<Self::Ok, Self::Error> {
         match self.schema {
             // Convert the UTF-32 character to UTF-8
-            Schema::String => self.write_bytes_with_len(v.to_string().as_bytes()),
-            Schema::Union(union) => {
+            ResolvedNode::String => self.write_bytes_with_len(v.to_string().as_bytes()),
+            ResolvedNode::Union(union) => {
                 UnionSerializer::new(self.writer, union, self.config).serialize_char(v)
             }
-            _ => Err(self.error("char", "Expected Schema::String")),
+            _ => Err(self.error("char", "Expected ResolvedNode::String")),
         }
     }
 
     fn serialize_str(mut self, v: &str) -> Result<Self::Ok, Self::Error> {
         match self.schema {
-            Schema::String | Schema::Uuid(UuidSchema::String) => {
+            ResolvedNode::String | ResolvedNode::Uuid(UuidSchema::String) => {
                 self.write_bytes_with_len(v.as_bytes())
             }
-            Schema::Union(union) => {
+            ResolvedNode::Union(union) => {
                 UnionSerializer::new(self.writer, union, self.config).serialize_str(v)
             }
-            _ => Err(self.error("str", "Expected Schema::String | Schema::Uuid(String)")),
+            _ => Err(self.error("str", "Expected ResolvedNode::String | ResolvedNode::Uuid(String)")),
         }
     }
 
     fn serialize_bytes(mut self, v: &[u8]) -> Result<Self::Ok, Self::Error> {
         match self.schema {
-            Schema::Bytes | Schema::BigDecimal | Schema::Decimal(DecimalSchema { inner: InnerDecimalSchema::Bytes, ..}) | Schema::Uuid(UuidSchema::Bytes) => {
+            ResolvedNode::Bytes | ResolvedNode::BigDecimal | ResolvedNode::Decimal(DecimalSchema { inner: InnerDecimalSchema::Bytes, ..}) | ResolvedNode::Uuid(UuidSchema::Bytes) => {
                 self.write_bytes_with_len(v)
             }
-            Schema::Fixed(fixed) | Schema::Decimal(DecimalSchema { inner: InnerDecimalSchema::Fixed(fixed), .. }) | Schema::Uuid(UuidSchema::Fixed(fixed)) | Schema::Duration(fixed) => {
+            ResolvedNode::Fixed(fixed) | ResolvedNode::Decimal(DecimalSchema { inner: InnerDecimalSchema::Fixed(fixed), .. }) | ResolvedNode::Uuid(UuidSchema::Fixed(fixed)) | ResolvedNode::Duration(fixed) => {
                 if fixed.size != v.len() {
                     Err(self.error("bytes", format!("Fixed size ({}) does not match bytes length ({})", fixed.size, v.len())))
                 } else {
                     self.write_bytes(v)
                 }
             }
-            Schema::Union(union) => {
+            ResolvedNode::Union(union) => {
                 UnionSerializer::new(self.writer, union, self.config).serialize_bytes(v)
             }
-            _ => Err(self.error("bytes", "Expected Schema::Bytes | Schema::Fixed | Schema::BigDecimal | Schema::Decimal | Schema::Uuid(Bytes | Fixed) | Schema::Duration")),
+            _ => Err(self.error("bytes", "Expected ResolvedNode::Bytes | ResolvedNode::Fixed | ResolvedNode::BigDecimal | ResolvedNode::Decimal | ResolvedNode::Uuid(Bytes | Fixed) | ResolvedNode::Duration")),
         }
     }
 
     fn serialize_none(self) -> Result<Self::Ok, Self::Error> {
-        if let Schema::Union(union) = self.schema
-            && union.variants().len() == 2
+        if let ResolvedNode::Union(ref union) = self.schema
+            && union.resolve_schemas().len() == 2
             && let Some(null_index) = union.index_of_schema_kind(SchemaKind::Null)
         {
             zig_i32(null_index as i32, &mut *self.writer)
         } else {
-            Err(self.error("none", "Expected Schema::Union([Schema::Null, _])"))
+            Err(self.error("none", "Expected ResolvedNode::Union([ResolvedNode::Null, _])"))
         }
     }
 
@@ -372,41 +345,42 @@ impl<'s, 'w, W: Write, S: Borrow<Schema>> Serializer for SchemaAwareSerializer<'
     where
         T: ?Sized + Serialize,
     {
-        if let Schema::Union(union) = self.schema
-            && union.variants().len() == 2
+        if let ResolvedNode::Union(ref union) = self.schema
+            && union.resolve_schemas().len() == 2
             && let Some(null_index) = union.index_of_schema_kind(SchemaKind::Null)
         {
             let some_index = (null_index + 1) & 1;
             let mut bytes_written = zig_i32(some_index as i32, &mut *self.writer)?;
+            let node = union.resolve_schemas()[some_index].clone();
             bytes_written +=
-                value.serialize(self.with_different_schema(&union.variants()[some_index])?)?;
+                value.serialize(self.with_different_schema(node)?)?;
             Ok(bytes_written)
         } else {
-            Err(self.error("some", "Expected Schema::Union([Schema::Null, _])"))
+            Err(self.error("some", "Expected ResolvedNode::Union([ResolvedNode::Null, _])"))
         }
     }
 
     fn serialize_unit(self) -> Result<Self::Ok, Self::Error> {
         match self.schema {
-            Schema::Null => Ok(0),
-            Schema::Union(union) => {
+            ResolvedNode::Null => Ok(0),
+            ResolvedNode::Union(union) => {
                 UnionSerializer::new(self.writer, union, self.config).serialize_unit()
             }
-            _ => Err(self.error("unit", "Expected Schema::Null")),
+            _ => Err(self.error("unit", "Expected ResolvedNode::Null")),
         }
     }
 
     fn serialize_unit_struct(self, name: &'static str) -> Result<Self::Ok, Self::Error> {
         match self.schema {
-            Schema::Record(record) if record.fields.is_empty() && record.name.name() == name => {
+            ResolvedNode::Record(record) if record.fields.is_empty() && record.name.name() == name => {
                 Ok(0)
             }
-            Schema::Union(union) => {
+            ResolvedNode::Union(union) => {
                 UnionSerializer::new(self.writer, union, self.config).serialize_unit_struct(name)
             }
             _ => Err(self.error(
                 "unit struct",
-                format!(r#"Expected Schema::Record(name: "{name}", fields: [])"#),
+                format!(r#"Expected ResolvedNode::Record(name: "{name}", fields: [])"#),
             )),
         }
     }
@@ -418,7 +392,7 @@ impl<'s, 'w, W: Write, S: Borrow<Schema>> Serializer for SchemaAwareSerializer<'
         variant: &'static str,
     ) -> Result<Self::Ok, Self::Error> {
         match self.schema {
-            Schema::Enum(enum_schema) => {
+            ResolvedNode::Enum(enum_schema) => {
                 // Plain enum
                 if variant.as_ptr() == SERIALIZING_SCHEMA_DEFAULT.as_ptr() || enum_schema.symbols[variant_index as usize] == variant {
                     zig_i32(variant_index as i32, &mut *self.writer)
@@ -426,16 +400,16 @@ impl<'s, 'w, W: Write, S: Borrow<Schema>> Serializer for SchemaAwareSerializer<'
                     Err(self.error("unit variant", format!(r#"Expected symbol "{variant}" at index {variant_index} in enum"#)))
                 }
             }
-            Schema::Union(union) => match self.get_resolved_union_variant(union, variant_index)? {
+            ResolvedNode::Union(ref union) => match union.resolve_schemas()[variant_index as usize] {
                 // Bare union
-                Schema::Null => zig_i32(variant_index as i32, &mut *self.writer),
-                Schema::Record(record) if record.fields.is_empty() && record.name.name() == variant => {
+                ResolvedNode::Null => zig_i32(variant_index as i32, &mut *self.writer),
+                ResolvedNode::Record(ref record) if record.fields.is_empty() && record.name.name() == variant => {
                     // Union of records
                     zig_i32(variant_index as i32, &mut *self.writer)
                 }
-                _ => Err(self.error("unit variant", format!("Expected Schema::Null | Schema::Record(name: {variant}, fields: []) at index {variant_index} in the union"))),
+                _ => Err(self.error("unit variant", format!("Expected ResolvedNode::Null | ResolvedNode::Record(name: {variant}, fields: []) at index {variant_index} in the union"))),
             }
-            _ => Err(self.error("unit variant", format!("Expected Schema::Enum(symbols[{variant_index}] == {variant}) | Schema::Union(variants[{variant_index}] == Schema::Null | Schema::Record(name: {variant}, fields: []))"))),
+            _ => Err(self.error("unit variant", format!("Expected ResolvedNode::Enum(symbols[{variant_index}] == {variant}) | ResolvedNode::Union(variants[{variant_index}] == ResolvedNode::Null | ResolvedNode::Record(name: {variant}, fields: []))"))),
         }
     }
 
@@ -448,15 +422,15 @@ impl<'s, 'w, W: Write, S: Borrow<Schema>> Serializer for SchemaAwareSerializer<'
         T: ?Sized + Serialize,
     {
         match self.schema {
-            Schema::Record(record) if record.fields.len() == 1 && record.name.name() == name => {
-                let schema = &record.fields[0].schema;
+            ResolvedNode::Record(ref record) if record.fields.len() == 1 && record.name.name() == name => {
+                let schema = record.fields[0].resolve_field();
                 value.serialize(self.with_different_schema(schema)?)
             }
-            Schema::Union(union) => UnionSerializer::new(self.writer, union, self.config)
+            ResolvedNode::Union(union) => UnionSerializer::new(self.writer, union, self.config)
                 .serialize_newtype_struct(name, value),
             _ => Err(self.error(
                 "newtype struct",
-                format!("Expected Schema::Record(name: {name}, fields: [_])"),
+                format!("Expected ResolvedNode::Record(name: {name}, fields: [_])"),
             )),
         }
     }
@@ -472,8 +446,8 @@ impl<'s, 'w, W: Write, S: Borrow<Schema>> Serializer for SchemaAwareSerializer<'
         T: ?Sized + Serialize,
     {
         match self.schema {
-            Schema::Union(union) => match self.get_resolved_union_variant(union, variant_index)? {
-                Schema::Record(record)
+            ResolvedNode::Union(ref union) => match &union.resolve_schemas()[variant_index as usize] {
+                ResolvedNode::Record(record)
                     if record.fields.len() == 1
                         && record.name.name() == variant
                         && record
@@ -483,44 +457,44 @@ impl<'s, 'w, W: Write, S: Borrow<Schema>> Serializer for SchemaAwareSerializer<'
                 {
                     // Union of records
                     let mut bytes_written = zig_i32(variant_index as i32, &mut *self.writer)?;
-                    let schema = &record.fields[0].schema;
+                    let schema = record.fields[0].resolve_field();
                     bytes_written += value.serialize(self.with_different_schema(schema)?)?;
                     Ok(bytes_written)
                 }
                 schema => {
                     let mut bytes_written = zig_i32(variant_index as i32, &mut *self.writer)?;
-                    bytes_written += value.serialize(self.with_different_schema(schema)?)?;
+                    bytes_written += value.serialize(self.with_different_schema(schema.clone())?)?;
                     Ok(bytes_written)
                 }
             },
-            _ => Err(self.error("newtype variant", "Expected Schema::Union")),
+            _ => Err(self.error("newtype variant", "Expected ResolvedNode::Union")),
         }
     }
 
     fn serialize_seq(self, len: Option<usize>) -> Result<Self::SerializeSeq, Self::Error> {
         match self.schema {
-            Schema::Array(array) => {
+            ResolvedNode::Array(array) => {
                 BlockSerializer::array(self.writer, array, self.config, len, None)
             }
-            Schema::Union(union) => {
+            ResolvedNode::Union(union) => {
                 UnionSerializer::new(self.writer, union, self.config).serialize_seq(len)
             }
-            _ => Err(self.error("seq", "Expected Schema::Array")),
+            _ => Err(self.error("seq", "Expected ResolvedNode::Array")),
         }
     }
 
     fn serialize_tuple(self, len: usize) -> Result<Self::SerializeTuple, Self::Error> {
         match self.schema {
-            Schema::Union(union) => {
+            ResolvedNode::Union(union) => {
                 // This needs to be matched first, otherwise the `schema if len == 1` will also
                 // match unions
                 UnionSerializer::new(self.writer, union, self.config).serialize_tuple(len)
             }
             // `len == 0` is not possible for derived Serialize implementations but users might use it.
             // The derived Serialize implementations use `serialize_unit` instead
-            Schema::Null if len == 0 => Ok(TupleSerializer::unit(None)),
+            ResolvedNode::Null if len == 0 => Ok(TupleSerializer::unit(None)),
             schema if len == 1 => Ok(TupleSerializer::one(self.writer, schema, self.config, None)),
-            Schema::Record(record) if record.fields.len() == len => Ok(TupleSerializer::many(
+            ResolvedNode::Record(record) if record.fields.len() == len => Ok(TupleSerializer::many(
                 self.writer,
                 record,
                 self.config,
@@ -529,7 +503,7 @@ impl<'s, 'w, W: Write, S: Borrow<Schema>> Serializer for SchemaAwareSerializer<'
             // This error case can only happen for len > 1
             _ => Err(self.error(
                 "tuple",
-                format!("Expected Schema::Record(fields.len() == {len})"),
+                format!("Expected ResolvedNode::Record(fields.len() == {len})"),
             )),
         }
     }
@@ -540,7 +514,7 @@ impl<'s, 'w, W: Write, S: Borrow<Schema>> Serializer for SchemaAwareSerializer<'
         len: usize,
     ) -> Result<Self::SerializeTupleStruct, Self::Error> {
         match self.schema {
-            Schema::Record(record) if record.fields.len() == len && record.name.name() == name => {
+            ResolvedNode::Record(record) if record.fields.len() == len && record.name.name() == name => {
                 Ok(ManyTupleSerializer::new(
                     self.writer,
                     record,
@@ -548,11 +522,11 @@ impl<'s, 'w, W: Write, S: Borrow<Schema>> Serializer for SchemaAwareSerializer<'
                     None,
                 ))
             }
-            Schema::Union(union) => UnionSerializer::new(self.writer, union, self.config)
+            ResolvedNode::Union(union) => UnionSerializer::new(self.writer, union, self.config)
                 .serialize_tuple_struct(name, len),
             _ => Err(self.error(
                 "tuple struct",
-                format!("Expected Schema::Record(name: {name}, fields.len() == {len})"),
+                format!("Expected ResolvedNode::Record(name: {name}, fields.len() == {len})"),
             )),
         }
     }
@@ -564,33 +538,33 @@ impl<'s, 'w, W: Write, S: Borrow<Schema>> Serializer for SchemaAwareSerializer<'
         variant: &'static str,
         len: usize,
     ) -> Result<Self::SerializeTupleVariant, Self::Error> {
-        if let Schema::Union(union) = self.schema
-            && let Schema::Record(record) = self.get_resolved_union_variant(union, variant_index)?
+        if let ResolvedNode::Union(ref union) = self.schema
+            && let ResolvedNode::Record(record) = &union.resolve_schemas()[variant_index as usize]
             && record.fields.len() == len
             && record.name.name() == variant
         {
             let bytes_written = zig_i32(variant_index as i32, &mut *self.writer)?;
             Ok(ManyTupleSerializer::new(
                 self.writer,
-                record,
+                record.clone(),
                 self.config,
                 Some(bytes_written),
             ))
         } else {
-            Err(self.error("tuple variant", format!("Expected Schema::Union(variants[{variant_index}] == Schema::Record(name: {variant}, fields.len() == {len}))")))
+            Err(self.error("tuple variant", format!("Expected ResolvedNode::Union(variants[{variant_index}] == ResolvedNode::Record(name: {variant}, fields.len() == {len}))")))
         }
     }
 
     fn serialize_map(self, len: Option<usize>) -> Result<Self::SerializeMap, Self::Error> {
         match self.schema {
-            Schema::Map(map) => Ok(MapOrRecordSerializer::map(
+            ResolvedNode::Map(map) => Ok(MapOrRecordSerializer::map(
                 self.writer,
                 map,
                 self.config,
                 len,
                 None,
             )?),
-            Schema::Record(record) => {
+            ResolvedNode::Record(record) => {
                 // Structs with flattened fields are serialized as a map
                 Ok(MapOrRecordSerializer::record(
                     self.writer,
@@ -599,12 +573,12 @@ impl<'s, 'w, W: Write, S: Borrow<Schema>> Serializer for SchemaAwareSerializer<'
                     len,
                 ))
             }
-            Schema::Union(union) => {
+            ResolvedNode::Union(union) => {
                 UnionSerializer::new(self.writer, union, self.config).serialize_map(len)
             }
             _ => Err(self.error(
                 "map",
-                "Expected Schema::Map | Schema::Record for structs with flattened fields",
+                "Expected ResolvedNode::Map | ResolvedNode::Record for structs with flattened fields",
             )),
         }
     }
@@ -618,16 +592,16 @@ impl<'s, 'w, W: Write, S: Borrow<Schema>> Serializer for SchemaAwareSerializer<'
             // Serde is inconsistent with the `name` and `len` provided. When using internally tagged
             // enums the name can be the name of the inner type of a newtype variant. The length can
             // also change based on `serialize_if`.
-            Schema::Record(record) => Ok(RecordSerializer::new(
+            ResolvedNode::Record(record) => Ok(RecordSerializer::new(
                 self.writer,
                 record,
                 self.config,
                 None,
             )),
-            Schema::Union(union) => {
+            ResolvedNode::Union(union) => {
                 UnionSerializer::new(self.writer, union, self.config).serialize_struct(name, len)
             }
-            _ => Err(self.error("struct", "Expected Schema::Record")),
+            _ => Err(self.error("struct", "Expected ResolvedNode::Record")),
         }
     }
 
@@ -638,20 +612,20 @@ impl<'s, 'w, W: Write, S: Borrow<Schema>> Serializer for SchemaAwareSerializer<'
         variant: &'static str,
         len: usize,
     ) -> Result<Self::SerializeStructVariant, Self::Error> {
-        if let Schema::Union(union) = self.schema
-            && let Schema::Record(record) = self.get_resolved_union_variant(union, variant_index)?
+        if let ResolvedNode::Union(ref union) = self.schema
+            && let ResolvedNode::Record(record) = &union.resolve_schemas()[variant_index as usize]
             && record.fields.len() == len
             && record.name.name() == variant
         {
             let bytes_written = zig_i32(variant_index as i32, &mut *self.writer)?;
             Ok(RecordSerializer::new(
                 self.writer,
-                record,
+                record.clone(),
                 self.config,
                 Some(bytes_written),
             ))
         } else {
-            Err(self.error("struct variant", format!("Expected Schema::Union(variants[{variant_index}] == Schema::Record(name: {variant}, fields.len() == {len}))")))
+            Err(self.error("struct variant", format!("Expected ResolvedNode::Union(variants[{variant_index}] == ResolvedNode::Record(name: {variant}, fields.len() == {len}))")))
         }
     }
 
@@ -660,16 +634,16 @@ impl<'s, 'w, W: Write, S: Borrow<Schema>> Serializer for SchemaAwareSerializer<'
     }
 }
 
-pub enum MapOrRecordSerializer<'s, 'w, W: Write, S: Borrow<Schema>> {
-    Map(BlockSerializer<'s, 'w, W, S>),
-    Record(RecordSerializer<'s, 'w, W, S>),
+pub enum MapOrRecordSerializer<'s, 'w, W: Write> {
+    Map(BlockSerializer<'s, 'w, W>),
+    Record(RecordSerializer<'s, 'w, W>),
 }
 
-impl<'s, 'w, W: Write, S: Borrow<Schema>> MapOrRecordSerializer<'s, 'w, W, S> {
+impl<'s, 'w, W: Write> MapOrRecordSerializer<'s, 'w, W> {
     pub fn record(
         writer: &'w mut W,
-        schema: &'s RecordSchema,
-        config: Config<'s, S>,
+        schema: ResolvedRecord<'s>,
+        config: Config,
         bytes_written: Option<usize>,
     ) -> Self {
         Self::Record(RecordSerializer::new(writer, schema, config, bytes_written))
@@ -677,8 +651,8 @@ impl<'s, 'w, W: Write, S: Borrow<Schema>> MapOrRecordSerializer<'s, 'w, W, S> {
 
     pub fn map(
         writer: &'w mut W,
-        schema: &'s MapSchema,
-        config: Config<'s, S>,
+        schema: ResolvedMap<'s>,
+        config: Config,
         len: Option<usize>,
         bytes_written: Option<usize>,
     ) -> Result<Self, Error> {
@@ -692,7 +666,7 @@ impl<'s, 'w, W: Write, S: Borrow<Schema>> MapOrRecordSerializer<'s, 'w, W, S> {
     }
 }
 
-impl<'s, 'w, W: Write, S: Borrow<Schema>> SerializeMap for MapOrRecordSerializer<'s, 'w, W, S> {
+impl<'s, 'w, W: Write> SerializeMap for MapOrRecordSerializer<'s, 'w, W> {
     type Ok = usize;
     type Error = Error;
 
@@ -749,17 +723,15 @@ mod tests {
     #[track_caller]
     fn assert_serialize_err<T: Serialize>(
         t: T,
-        schema: &Schema,
-        names: &HashMap<Name, &Schema>,
+        schema: &ResolvedSchema,
         expected: &str,
     ) {
         let config = Config {
-            names,
             target_block_size: None,
             human_readable: false,
         };
         let mut buffer = Vec::new();
-        let serializer = SchemaAwareSerializer::new(&mut buffer, schema, config).unwrap();
+        let serializer = SchemaAwareSerializer::new(&mut buffer, ResolvedNode::new(schema), config).unwrap();
         let error = t
             .serialize(serializer)
             .expect_err("This should not serialize");
@@ -769,17 +741,15 @@ mod tests {
     #[track_caller]
     fn assert_serialize<T: Serialize>(
         t: T,
-        schema: &Schema,
-        names: &HashMap<Name, &Schema>,
+        schema: &ResolvedSchema,
         expected: &[u8],
     ) {
         let config = Config {
-            names,
             target_block_size: None,
             human_readable: false,
         };
         let mut buffer = Vec::new();
-        let serializer = SchemaAwareSerializer::new(&mut buffer, schema, config).unwrap();
+        let serializer = SchemaAwareSerializer::new(&mut buffer, ResolvedNode::new(schema), config).unwrap();
         let bytes_written = t.serialize(serializer).expect("This should serialize");
         assert_eq!(bytes_written, buffer.len());
         assert_eq!(&buffer, expected);
@@ -787,38 +757,32 @@ mod tests {
 
     #[test]
     fn test_serialize_null() -> TestResult {
-        let schema = Schema::Null;
-        let names = HashMap::new();
+        let schema = ResolvedSchema::builder().build_one(Schema::Null)?;
 
-        assert_serialize((), &schema, &names, &[]);
+        assert_serialize((), &schema, &[]);
         assert_serialize_err(
             None::<()>,
             &schema,
-            &names,
             "Failed to serialize value of type `none` using Schema::Null: Expected Schema::Union([Schema::Null, _])",
         );
         assert_serialize_err(
             None::<i32>,
             &schema,
-            &names,
             "Failed to serialize value of type `none` using Schema::Null: Expected Schema::Union([Schema::Null, _])",
         );
         assert_serialize_err(
             None::<String>,
             &schema,
-            &names,
             "Failed to serialize value of type `none` using Schema::Null: Expected Schema::Union([Schema::Null, _])",
         );
         assert_serialize_err(
             "",
             &schema,
-            &names,
             "Failed to serialize value of type `str` using Schema::Null: Expected Schema::String | Schema::Uuid(String)",
         );
         assert_serialize_err(
             Some(""),
             &schema,
-            &names,
             "Failed to serialize value of type `some` using Schema::Null: Expected Schema::Union([Schema::Null, _])",
         );
 
@@ -827,21 +791,18 @@ mod tests {
 
     #[test]
     fn test_serialize_bool() -> TestResult {
-        let schema = Schema::Boolean;
-        let names = HashMap::new();
+        let schema = ResolvedSchema::builder().build_one(Schema::Boolean)?;
 
-        assert_serialize(true, &schema, &names, &[1]);
-        assert_serialize(false, &schema, &names, &[0]);
+        assert_serialize(true, &schema, &[1]);
+        assert_serialize(false, &schema,  &[0]);
         assert_serialize_err(
             "",
             &schema,
-            &names,
             "Failed to serialize value of type `str` using Schema::Boolean: Expected Schema::String | Schema::Uuid(String)",
         );
         assert_serialize_err(
             Some(""),
             &schema,
-            &names,
             "Failed to serialize value of type `some` using Schema::Boolean: Expected Schema::Union([Schema::Null, _])",
         );
 
@@ -850,30 +811,26 @@ mod tests {
 
     #[test]
     fn test_serialize_int() -> TestResult {
-        let schema = Schema::Int;
-        let names = HashMap::new();
+        let schema = ResolvedSchema::builder().build_one(Schema::Int)?;
 
-        assert_serialize(4u8, &schema, &names, &[8]);
-        assert_serialize(31u16, &schema, &names, &[62]);
-        assert_serialize(7i8, &schema, &names, &[14]);
-        assert_serialize(-57i16, &schema, &names, &[113]);
-        assert_serialize(129i32, &schema, &names, &[130, 2]);
+        assert_serialize(4u8, &schema, &[8]);
+        assert_serialize(31u16, &schema, &[62]);
+        assert_serialize(7i8, &schema, &[14]);
+        assert_serialize(-57i16, &schema, &[113]);
+        assert_serialize(129i32, &schema, &[130, 2]);
         assert_serialize_err(
             13u32,
             &schema,
-            &names,
             "Failed to serialize value of type `u32` using Schema::Int: Expected Schema::Long | Schema::TimeMicros | Schema::{,Local}Timestamp{Millis,Micros,Nanos}",
         );
         assert_serialize_err(
             "",
             &schema,
-            &names,
             "Failed to serialize value of type `str` using Schema::Int: Expected Schema::String | Schema::Uuid(String)",
         );
         assert_serialize_err(
             Some(""),
             &schema,
-            &names,
             "Failed to serialize value of type `some` using Schema::Int: Expected Schema::Union([Schema::Null, _])",
         );
 
@@ -882,57 +839,48 @@ mod tests {
 
     #[test]
     fn test_serialize_long() -> TestResult {
-        let schema = Schema::Long;
-        let names = HashMap::new();
+        let schema = ResolvedSchema::builder().build_one(Schema::Long)?;
 
-        assert_serialize(13u32, &schema, &names, &[26]);
-        assert_serialize(-432i64, &schema, &names, &[223, 6]);
+        assert_serialize(13u32, &schema, &[26]);
+        assert_serialize(-432i64, &schema,&[223, 6]);
         assert_serialize_err(
             4u8,
             &schema,
-            &names,
             "Failed to serialize value of type `u8` using Schema::Long: Expected Schema::Int | Schema::Date | Schema::TimeMillis",
         );
         assert_serialize_err(
             31u16,
             &schema,
-            &names,
             "Failed to serialize value of type `u16` using Schema::Long: Expected Schema::Int | Schema::Date | Schema::TimeMillis",
         );
         assert_serialize_err(
             7i8,
             &schema,
-            &names,
             "Failed to serialize value of type `i8` using Schema::Long: Expected Schema::Int | Schema::Date | Schema::TimeMillis",
         );
         assert_serialize_err(
             -57i16,
             &schema,
-            &names,
             "Failed to serialize value of type `i16` using Schema::Long: Expected Schema::Int | Schema::Date | Schema::TimeMillis",
         );
         assert_serialize_err(
             129i32,
             &schema,
-            &names,
             "Failed to serialize value of type `i32` using Schema::Long: Expected Schema::Int | Schema::Date | Schema::TimeMillis",
         );
         assert_serialize_err(
             24u64,
             &schema,
-            &names,
             r#"Failed to serialize value of type `u64` using Schema::Long: Expected Schema::Fixed(name: "u64", size: 8)"#,
         );
         assert_serialize_err(
             "",
             &schema,
-            &names,
             "Failed to serialize value of type `str` using Schema::Long: Expected Schema::String | Schema::Uuid(String)",
         );
         assert_serialize_err(
             Some(""),
             &schema,
-            &names,
             "Failed to serialize value of type `some` using Schema::Long: Expected Schema::Union([Schema::Null, _])",
         );
 
@@ -941,26 +889,22 @@ mod tests {
 
     #[test]
     fn test_serialize_float() -> TestResult {
-        let schema = Schema::Float;
-        let names = HashMap::new();
+        let schema = ResolvedSchema::builder().build_one(Schema::Float)?;
 
-        assert_serialize(4.7f32, &schema, &names, &[102, 102, 150, 64]);
+        assert_serialize(4.7f32, &schema,  &[102, 102, 150, 64]);
         assert_serialize_err(
             -14.1f64,
             &schema,
-            &names,
             "Failed to serialize value of type `f64` using Schema::Float: Expected Schema::Double",
         );
         assert_serialize_err(
             "",
             &schema,
-            &names,
             "Failed to serialize value of type `str` using Schema::Float: Expected Schema::String | Schema::Uuid(String)",
         );
         assert_serialize_err(
             Some(""),
             &schema,
-            &names,
             "Failed to serialize value of type `some` using Schema::Float: Expected Schema::Union([Schema::Null, _])",
         );
 
@@ -975,25 +919,21 @@ mod tests {
         assert_serialize(
             -14.1f64,
             &schema,
-            &names,
             &[51, 51, 51, 51, 51, 51, 44, 192],
         );
         assert_serialize_err(
             4.7f32,
             &schema,
-            &names,
             "Failed to serialize value of type `f32` using Schema::Double: Expected Schema::Float",
         );
         assert_serialize_err(
             "",
             &schema,
-            &names,
             "Failed to serialize value of type `str` using Schema::Double: Expected Schema::String | Schema::Uuid(String)",
         );
         assert_serialize_err(
             Some(""),
             &schema,
-            &names,
             "Failed to serialize value of type `some` using Schema::Double: Expected Schema::Union([Schema::Null, _])",
         );
 
@@ -1008,37 +948,31 @@ mod tests {
         assert_serialize(
             Bytes::new(&[12, 3, 7, 91, 4]),
             &schema,
-            &names,
             &[10, 12, 3, 7, 91, 4],
         );
         assert_serialize_err(
             'a',
             &schema,
-            &names,
             "Failed to serialize value of type `char` using Schema::Bytes: Expected Schema::String",
         );
         assert_serialize_err(
             "test",
             &schema,
-            &names,
             "Failed to serialize value of type `str` using Schema::Bytes: Expected Schema::String | Schema::Uuid(String)",
         );
         assert_serialize_err(
             (),
             &schema,
-            &names,
             "Failed to serialize value of type `unit` using Schema::Bytes: Expected Schema::Null",
         );
         assert_serialize_err(
             PhantomData::<String>,
             &schema,
-            &names,
             r#"Failed to serialize value of type `unit struct` using Schema::Bytes: Expected Schema::Record(name: "PhantomData", fields: [])"#,
         );
         assert_serialize_err(
             Some(""),
             &schema,
-            &names,
             "Failed to serialize value of type `some` using Schema::Bytes: Expected Schema::Union([Schema::Null, _])",
         );
 
@@ -1050,36 +984,31 @@ mod tests {
         let schema = Schema::String;
         let names = HashMap::new();
 
-        assert_serialize('a', &schema, &names, &[2, b'a']);
-        assert_serialize("test", &schema, &names, &[8, b't', b'e', b's', b't']);
+        assert_serialize('a', &schema,  &[2, b'a']);
+        assert_serialize("test", &schema,  &[8, b't', b'e', b's', b't']);
         assert_serialize(
             BigDecimal::new(BigInt::new(Sign::Plus, vec![50024]), 2),
             &schema,
-            &names,
             &[12, b'5', b'0', b'0', b'.', b'2', b'4'],
         );
         assert_serialize_err(
             Bytes::new(&[12, 3, 7, 91, 4]),
             &schema,
-            &names,
             "Failed to serialize value of type `bytes` using Schema::String: Expected Schema::Bytes | Schema::Fixed | Schema::BigDecimal | Schema::Decimal | Schema::Uuid(Bytes | Fixed) | Schema::Duration",
         );
         assert_serialize_err(
             (),
             &schema,
-            &names,
             "Failed to serialize value of type `unit` using Schema::String: Expected Schema::Null",
         );
         assert_serialize_err(
             PhantomData::<String>,
             &schema,
-            &names,
             r#"Failed to serialize value of type `unit struct` using Schema::String: Expected Schema::Record(name: "PhantomData", fields: [])"#,
         );
         assert_serialize_err(
             Some(""),
             &schema,
-            &names,
             "Failed to serialize value of type `some` using Schema::String: Expected Schema::Union([Schema::Null, _])",
         );
 
@@ -1122,7 +1051,6 @@ mod tests {
         assert_serialize(
             good_record,
             &schema,
-            &names,
             &[8, b't', b'e', b's', b't', 20],
         );
 
@@ -1133,19 +1061,16 @@ mod tests {
         assert_serialize_err(
             bad_record,
             &schema,
-            &names,
             r#"Missing field in record: "fooStringField""#,
         );
         assert_serialize_err(
             "",
             &schema,
-            &names,
             r#"Failed to serialize value of type `str` using Schema::Record(RecordSchema { name: Name { name: "TestRecord", .. }, fields: [RecordField { name: "stringField", schema: String, .. }, RecordField { name: "intField", schema: Int, .. }], .. }): Expected Schema::String | Schema::Uuid(String)"#,
         );
         assert_serialize_err(
             Some(""),
             &schema,
-            &names,
             r#"Failed to serialize value of type `some` using Schema::Record(RecordSchema { name: Name { name: "TestRecord", .. }, fields: [RecordField { name: "stringField", schema: String, .. }, RecordField { name: "intField", schema: Int, .. }], .. }): Expected Schema::Union([Schema::Null, _])"#,
         );
 
@@ -1166,7 +1091,7 @@ mod tests {
 
         #[derive(Serialize)]
         struct EmptyRecord;
-        assert_serialize(EmptyRecord, &schema, &names, &[]);
+        assert_serialize(EmptyRecord, &schema,  &[]);
 
         #[derive(Serialize)]
         #[serde(rename = "EmptyRecord")]
@@ -1176,29 +1101,25 @@ mod tests {
         let record = NonEmptyRecord {
             foo: "bar".to_string(),
         };
-        assert_serialize_err(record, &schema, &names, r#"Missing field in record: "foo""#);
+        assert_serialize_err(record, &schema,  r#"Missing field in record: "foo""#);
         assert_serialize_err(
             (),
             &schema,
-            &names,
             r#"Failed to serialize value of type `unit` using Schema::Record(RecordSchema { name: Name { name: "EmptyRecord", .. }, fields: [], .. }): Expected Schema::Null"#,
         );
         assert_serialize_err(
             "",
             &schema,
-            &names,
             r#"Failed to serialize value of type `str` using Schema::Record(RecordSchema { name: Name { name: "EmptyRecord", .. }, fields: [], .. }): Expected Schema::String | Schema::Uuid(String)"#,
         );
         assert_serialize_err(
             PhantomData::<String>,
             &schema,
-            &names,
             r#"Failed to serialize value of type `unit struct` using Schema::Record(RecordSchema { name: Name { name: "EmptyRecord", .. }, fields: [], .. }): Expected Schema::Record(name: "PhantomData", fields: [])"#,
         );
         assert_serialize_err(
             Some(""),
             &schema,
-            &names,
             r#"Failed to serialize value of type `some` using Schema::Record(RecordSchema { name: Name { name: "EmptyRecord", .. }, fields: [], .. }): Expected Schema::Union([Schema::Null, _])"#,
         );
 
@@ -1226,14 +1147,13 @@ mod tests {
 
         let names = HashMap::new();
 
-        assert_serialize(Suit::Spades, &schema, &names, &[0]);
-        assert_serialize(Suit::Hearts, &schema, &names, &[2]);
-        assert_serialize(Suit::Diamonds, &schema, &names, &[4]);
-        assert_serialize(Suit::Clubs, &schema, &names, &[6]);
+        assert_serialize(Suit::Spades, &schema,  &[0]);
+        assert_serialize(Suit::Hearts, &schema,  &[2]);
+        assert_serialize(Suit::Diamonds, &schema,  &[4]);
+        assert_serialize(Suit::Clubs, &schema,  &[6]);
         assert_serialize_err(
             None::<()>,
             &schema,
-            &names,
             r#"Failed to serialize value of type `none` using Schema::Enum(EnumSchema { name: Name { name: "Suit", .. }, symbols: ["SPADES", "HEARTS", "DIAMONDS", "CLUBS"], .. }): Expected Schema::Union([Schema::Null, _])"#,
         );
 
@@ -1254,13 +1174,11 @@ mod tests {
         assert_serialize(
             vec![10i64, 5, 400],
             &schema,
-            &names,
             &[6, 20, 10, 160, 6, 0],
         );
         assert_serialize_err(
             vec![1_f32],
             &schema,
-            &names,
             "Failed to serialize value of type `f32` using Schema::Long: Expected Schema::Float",
         );
 
@@ -1285,7 +1203,6 @@ mod tests {
         assert_serialize(
             map,
             &schema,
-            &names,
             &[
                 4, 10, b'i', b't', b'e', b'm', b'1', 20, 10, b'i', b't', b'e', b'm', b'2', 160, 6,
                 0,
@@ -1297,7 +1214,6 @@ mod tests {
         assert_serialize_err(
             map,
             &schema,
-            &names,
             "Failed to serialize value of type `str` using Schema::Long: Expected Schema::String | Schema::Uuid(String)",
         );
 
@@ -1318,16 +1234,15 @@ mod tests {
 
         let names = HashMap::new();
 
-        assert_serialize(Some(10i64), &schema, &names, &[2, 20]);
-        assert_serialize(None::<i64>, &schema, &names, &[0]);
-        assert_serialize(NullableLong::Long(400), &schema, &names, &[2, 160, 6]);
-        assert_serialize(NullableLong::Null, &schema, &names, &[0]);
-        assert_serialize(400i64, &schema, &names, &[2, 160, 6]);
-        assert_serialize((), &schema, &names, &[0]);
+        assert_serialize(Some(10i64), &schema,  &[2, 20]);
+        assert_serialize(None::<i64>, &schema,  &[0]);
+        assert_serialize(NullableLong::Long(400), &schema,  &[2, 160, 6]);
+        assert_serialize(NullableLong::Null, &schema,  &[0]);
+        assert_serialize(400i64, &schema,  &[2, 160, 6]);
+        assert_serialize((), &schema,  &[0]);
         assert_serialize_err(
             "invalid",
             &schema,
-            &names,
             "Failed to serialize value of type `str` using Schema::Union(UnionSchema { schemas: [Null, Long] }): Expected Schema::String in variants",
         );
 
@@ -1348,21 +1263,19 @@ mod tests {
         }
 
         let names = HashMap::new();
-        assert_serialize(LongOrString::Null, &schema, &names, &[0]);
-        assert_serialize(LongOrString::Long(400), &schema, &names, &[2, 160, 6]);
+        assert_serialize(LongOrString::Null, &schema,  &[0]);
+        assert_serialize(LongOrString::Long(400), &schema,  &[2, 160, 6]);
         assert_serialize(
             LongOrString::Str("test".into()),
             &schema,
-            &names,
             &[4, 8, b't', b'e', b's', b't'],
         );
-        assert_serialize((), &schema, &names, &[0]);
-        assert_serialize(400i64, &schema, &names, &[2, 160, 6]);
-        assert_serialize("test", &schema, &names, &[4, 8, b't', b'e', b's', b't']);
+        assert_serialize((), &schema,  &[0]);
+        assert_serialize(400i64, &schema,  &[2, 160, 6]);
+        assert_serialize("test", &schema,  &[4, 8, b't', b'e', b's', b't']);
         assert_serialize_err(
             1f64,
             &schema,
-            &names,
             "Failed to serialize value of type `f64` using Schema::Union(UnionSchema { schemas: [Null, Long, String] }): Expected Schema::Double in variants",
         );
 
@@ -1384,25 +1297,21 @@ mod tests {
         assert_serialize(
             Bytes::new(&[10, 124, 31, 97, 14, 201, 3, 88]),
             &schema,
-            &names,
             &[10, 124, 31, 97, 14, 201, 3, 88],
         );
         assert_serialize_err(
             Bytes::new(&[123]),
             &schema,
-            &names,
             r#"Failed to serialize value of type `bytes` using Schema::Fixed(FixedSchema { name: Name { name: "LongVal", .. }, size: 8, .. }): Fixed size (8) does not match bytes length (1)"#,
         );
         assert_serialize_err(
             [1u8; 8],
             &schema,
-            &names,
             r#"Failed to serialize value of type `tuple` using Schema::Fixed(FixedSchema { name: Name { name: "LongVal", .. }, size: 8, .. }): Expected Schema::Record(fields.len() == 8)"#,
         );
         assert_serialize_err(
             [1u8, 2, 3, 4, 5, 6, 7, 8].as_slice(),
             &schema,
-            &names,
             r#"Failed to serialize value of type `seq` using Schema::Fixed(FixedSchema { name: Name { name: "LongVal", .. }, size: 8, .. }): Expected Schema::Array"#,
         );
 
@@ -1423,11 +1332,10 @@ mod tests {
         let names = HashMap::new();
 
         let val = Decimal::from(&[251, 155]);
-        assert_serialize(val, &schema, &names, &[4, 251, 155]);
+        assert_serialize(val, &schema,  &[4, 251, 155]);
         assert_serialize_err(
             (),
             &schema,
-            &names,
             "Failed to serialize value of type `unit` using Schema::Decimal(DecimalSchema { precision: 16, scale: 2, inner: Bytes }): Expected Schema::Null",
         );
 
@@ -1450,11 +1358,10 @@ mod tests {
         let names = HashMap::new();
 
         let val = Decimal::from(&[0, 0, 0, 0, 0, 0, 251, 155]);
-        assert_serialize(val, &schema, &names, &[0, 0, 0, 0, 0, 0, 251, 155]);
+        assert_serialize(val, &schema,  &[0, 0, 0, 0, 0, 0, 251, 155]);
         assert_serialize_err(
             (),
             &schema,
-            &names,
             r#"Failed to serialize value of type `unit` using Schema::Decimal(DecimalSchema { precision: 16, scale: 2, inner: Fixed(FixedSchema { name: Name { name: "FixedDecimal", .. }, size: 8, attributes: {"precision": Number(16), "scale": Number(2)}, .. }) }): Expected Schema::Null"#,
         );
 
@@ -1484,7 +1391,7 @@ mod tests {
         let val = BigDecimalWrapper {
             value: BigDecimal::new(BigInt::new(Sign::Plus, vec![50024]), 2),
         };
-        assert_serialize(val, &schema, &names, &[10, 6, 0, 195, 104, 4]);
+        assert_serialize(val, &schema,  &[10, 6, 0, 195, 104, 4]);
 
         Ok(())
     }
@@ -1509,7 +1416,6 @@ mod tests {
         assert_serialize(
             uuid,
             &schema,
-            &names,
             &[
                 140, 40, 218, 129, 35, 140, 67, 38, 189, 221, 78, 61, 0, 204, 80, 153,
             ],
@@ -1517,7 +1423,6 @@ mod tests {
         assert_serialize_err(
             1u8,
             &schema,
-            &names,
             r#"Failed to serialize value of type `u8` using Schema::Uuid(Fixed(FixedSchema { name: Name { name: "FixedUuid", .. }, size: 16, .. })): Expected Schema::Int | Schema::Date | Schema::TimeMillis"#,
         );
 
@@ -1535,20 +1440,18 @@ mod tests {
 
         let names = HashMap::new();
 
-        assert_serialize(100u8, &schema, &names, &[200, 1]);
-        assert_serialize(1000u16, &schema, &names, &[208, 15]);
-        assert_serialize(1000i16, &schema, &names, &[208, 15]);
-        assert_serialize(10000i32, &schema, &names, &[160, 156, 1]);
+        assert_serialize(100u8, &schema,  &[200, 1]);
+        assert_serialize(1000u16, &schema,  &[208, 15]);
+        assert_serialize(1000i16, &schema,  &[208, 15]);
+        assert_serialize(10000i32, &schema,  &[160, 156, 1]);
         assert_serialize_err(
             10000u32,
             &schema,
-            &names,
             "Failed to serialize value of type `u32` using Schema::Date: Expected Schema::Long | Schema::TimeMicros | Schema::{,Local}Timestamp{Millis,Micros,Nanos}",
         );
         assert_serialize_err(
             10000f32,
             &schema,
-            &names,
             "Failed to serialize value of type `f32` using Schema::Date: Expected Schema::Float",
         );
 
@@ -1566,20 +1469,18 @@ mod tests {
 
         let names = HashMap::new();
 
-        assert_serialize(100u8, &schema, &names, &[200, 1]);
-        assert_serialize(1000u16, &schema, &names, &[208, 15]);
-        assert_serialize(1000i16, &schema, &names, &[208, 15]);
-        assert_serialize(10000i32, &schema, &names, &[160, 156, 1]);
+        assert_serialize(100u8, &schema,  &[200, 1]);
+        assert_serialize(1000u16, &schema,  &[208, 15]);
+        assert_serialize(1000i16, &schema,  &[208, 15]);
+        assert_serialize(10000i32, &schema,  &[160, 156, 1]);
         assert_serialize_err(
             10000u32,
             &schema,
-            &names,
             "Failed to serialize value of type `u32` using Schema::TimeMillis: Expected Schema::Long | Schema::TimeMicros | Schema::{,Local}Timestamp{Millis,Micros,Nanos}",
         );
         assert_serialize_err(
             10000f32,
             &schema,
-            &names,
             "Failed to serialize value of type `f32` using Schema::TimeMillis: Expected Schema::Float",
         );
 
@@ -1597,36 +1498,31 @@ mod tests {
 
         let names = HashMap::new();
 
-        assert_serialize(10000u32, &schema, &names, &[160, 156, 1]);
-        assert_serialize(10000i64, &schema, &names, &[160, 156, 1]);
+        assert_serialize(10000u32, &schema,  &[160, 156, 1]);
+        assert_serialize(10000i64, &schema,  &[160, 156, 1]);
         assert_serialize_err(
             100u8,
             &schema,
-            &names,
             "Failed to serialize value of type `u8` using Schema::TimeMicros: Expected Schema::Int | Schema::Date | Schema::TimeMillis",
         );
         assert_serialize_err(
             1000u16,
             &schema,
-            &names,
             "Failed to serialize value of type `u16` using Schema::TimeMicros: Expected Schema::Int | Schema::Date | Schema::TimeMillis",
         );
         assert_serialize_err(
             1000i16,
             &schema,
-            &names,
             "Failed to serialize value of type `i16` using Schema::TimeMicros: Expected Schema::Int | Schema::Date | Schema::TimeMillis",
         );
         assert_serialize_err(
             10000i32,
             &schema,
-            &names,
             "Failed to serialize value of type `i32` using Schema::TimeMicros: Expected Schema::Int | Schema::Date | Schema::TimeMillis",
         );
         assert_serialize_err(
             10000f32,
             &schema,
-            &names,
             "Failed to serialize value of type `f32` using Schema::TimeMicros: Expected Schema::Float",
         );
 
@@ -1649,12 +1545,11 @@ mod tests {
 
             let names = HashMap::new();
 
-            assert_serialize(10000u32, &schema, &names, &[160, 156, 1]);
-            assert_serialize(10000i64, &schema, &names, &[160, 156, 1]);
+            assert_serialize(10000u32, &schema,  &[160, 156, 1]);
+            assert_serialize(10000i64, &schema,  &[160, 156, 1]);
             assert_serialize_err(
                 100u8,
                 &schema,
-                &names,
                 &format!(
                     "Failed to serialize value of type `u8` using Schema::Timestamp{error}: Expected Schema::Int | Schema::Date | Schema::TimeMillis"
                 ),
@@ -1662,7 +1557,6 @@ mod tests {
             assert_serialize_err(
                 1000u16,
                 &schema,
-                &names,
                 &format!(
                     "Failed to serialize value of type `u16` using Schema::Timestamp{error}: Expected Schema::Int | Schema::Date | Schema::TimeMillis"
                 ),
@@ -1670,7 +1564,6 @@ mod tests {
             assert_serialize_err(
                 1000i16,
                 &schema,
-                &names,
                 &format!(
                     "Failed to serialize value of type `i16` using Schema::Timestamp{error}: Expected Schema::Int | Schema::Date | Schema::TimeMillis"
                 ),
@@ -1678,7 +1571,6 @@ mod tests {
             assert_serialize_err(
                 10000i32,
                 &schema,
-                &names,
                 &format!(
                     "Failed to serialize value of type `i32` using Schema::Timestamp{error}: Expected Schema::Int | Schema::Date | Schema::TimeMillis"
                 ),
@@ -1686,7 +1578,6 @@ mod tests {
             assert_serialize_err(
                 10000f32,
                 &schema,
-                &names,
                 &format!(
                     "Failed to serialize value of type `f32` using Schema::Timestamp{error}: Expected Schema::Float"
                 ),
@@ -1713,13 +1604,11 @@ mod tests {
         assert_serialize(
             duration,
             &schema,
-            &names,
             &[3, 0, 0, 0, 2, 0, 0, 0, 176, 4, 0, 0],
         );
         assert_serialize_err(
             [0u8; 12],
             &schema,
-            &names,
             r#"Failed to serialize value of type `tuple` using Schema::Duration(FixedSchema { name: Name { name: "duration", .. }, size: 12, .. }): Expected Schema::Record(fields.len() == 12)"#,
         );
 
@@ -1976,7 +1865,6 @@ mod tests {
         assert_serialize(
             foo,
             &schema,
-            &names,
             &[
                 10, b'W', b'o', b'r', b'l', b'd', 10, b'H', b'e', b'l', b'l', b'o', 24, 45, 68, 84,
                 251, 33, 9, 64, 10, 84,
@@ -1991,7 +1879,7 @@ mod tests {
         let schema = Schema::String;
         let names = HashMap::new();
 
-        assert_serialize('a', &schema, &names, &[2, b'a']);
+        assert_serialize('a', &schema,  &[2, b'a']);
 
         Ok(())
     }
@@ -2004,7 +1892,6 @@ mod tests {
         assert_serialize_err(
             'a',
             &schema,
-            &names,
             "Failed to serialize value of type `char` using Schema::Bytes: Expected Schema::String",
         );
 
@@ -2025,7 +1912,6 @@ mod tests {
         assert_serialize_err(
             'a',
             &schema,
-            &names,
             r#"Failed to serialize value of type `char` using Schema::Fixed(FixedSchema { name: Name { name: "char", .. }, size: 4, .. }): Expected Schema::String"#,
         );
 
@@ -2037,7 +1923,7 @@ mod tests {
         let schema = Schema::String;
         let names = HashMap::new();
 
-        assert_serialize('👹', &schema, &names, &[8, 240, 159, 145, 185]);
+        assert_serialize('👹', &schema,  &[8, 240, 159, 145, 185]);
 
         Ok(())
     }
@@ -2056,7 +1942,6 @@ mod tests {
         assert_serialize(
             i128::MAX,
             &schema,
-            &names,
             &[
                 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
                 0xFF, 0x7F,
@@ -2080,7 +1965,6 @@ mod tests {
         assert_serialize_err(
             i128::MAX,
             &schema,
-            &names,
             r#"Failed to serialize value of type `i128` using Schema::Fixed(FixedSchema { name: Name { name: "onehundredtwentyeight", .. }, size: 16, .. }): Expected Schema::Fixed(name: "i128", size: 16)"#,
         );
 
@@ -2101,7 +1985,6 @@ mod tests {
         assert_serialize_err(
             i128::MAX,
             &schema,
-            &names,
             r#"Failed to serialize value of type `i128` using Schema::Fixed(FixedSchema { name: Name { name: "i128", .. }, size: 8, .. }): Expected Schema::Fixed(name: "i128", size: 16)"#,
         );
 
@@ -2122,7 +2005,6 @@ mod tests {
         assert_serialize(
             u128::MAX,
             &schema,
-            &names,
             &[
                 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
                 0xFF, 0xFF,
@@ -2146,7 +2028,6 @@ mod tests {
         assert_serialize_err(
             u128::MAX,
             &schema,
-            &names,
             r#"Failed to serialize value of type `u128` using Schema::Fixed(FixedSchema { name: Name { name: "onehundredtwentyeight", .. }, size: 16, .. }): Expected Schema::Fixed(name: "u128", size: 16)"#,
         );
 
@@ -2167,7 +2048,6 @@ mod tests {
         assert_serialize_err(
             u128::MAX,
             &schema,
-            &names,
             r#"Failed to serialize value of type `u128` using Schema::Fixed(FixedSchema { name: Name { name: "u128", .. }, size: 8, .. }): Expected Schema::Fixed(name: "u128", size: 16)"#,
         );
 
@@ -2183,11 +2063,10 @@ mod tests {
         ]"#,
         )?;
         let names = HashMap::new();
-        assert_serialize(Bytes::new(&[0, 1, 2, 3]), &schema, &names, &[0, 0, 1, 2, 3]);
+        assert_serialize(Bytes::new(&[0, 1, 2, 3]), &schema,  &[0, 0, 1, 2, 3]);
         assert_serialize(
             Bytes::new(&[4, 5, 6, 7, 8, 9, 10, 11]),
             &schema,
-            &names,
             &[2, 4, 5, 6, 7, 8, 9, 10, 11],
         );
 

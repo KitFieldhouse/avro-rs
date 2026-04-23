@@ -21,9 +21,10 @@ use serde::Serialize;
 use serde_json::Value as JsonValue;
 use strum::Display;
 
-use crate::schema::{Aliases, ArraySchema, DecimalSchema, DefaultToResolve, Documentation, EnumSchema, FixedSchema, MapSchema, Name, NameMap, NameSet, RecordField, RecordSchema, Schema, SchemaKind, SchemaWithSymbols, UnionSchema, UuidSchema, unravel_inner};
+use crate::schema::{Aliases, ArraySchema, DecimalSchema, DefaultToResolve, Documentation, EnumSchema, FixedSchema, InnerDecimalSchema, MapSchema, Name, NameMap, NameSet, RecordField, RecordSchema, Schema, SchemaKind, SchemaWithSymbols, UnionSchema, UuidSchema, record, unravel_inner};
 use crate::{AvroResult, types};
 use crate::error::{Details,Error};
+use std::borrow::Borrow;
 use std::collections::BTreeMap;
 use std::fmt::Debug;
 use std::{collections::{HashMap, HashSet}, sync::Arc};
@@ -223,6 +224,12 @@ impl<S: AsRef<str>> IntoSchemaWithSymbols for S {
 impl IntoSchemaWithSymbols for &Schema {
     fn into_schema_with_symbols(self) -> AvroResult<SchemaWithSymbols> {
         Ok(self.clone().into())
+    }
+}
+
+impl IntoSchemaWithSymbols for Schema {
+    fn into_schema_with_symbols(self) -> AvroResult<SchemaWithSymbols> {
+        Ok(self.into())
     }
 }
 
@@ -649,6 +656,16 @@ impl<'a> ResolvedNode<'a> {
         ResolvedNode::LocalTimestampNanos => ResolvedSchema{stub: Schema::LocalTimestampNanos.into(), context: ResolvedContext::empty()},
        }
    }
+
+   // KTODO: docs
+   pub fn get_name(&self)-> Option<Arc<Name>>{
+       self.get_resolved().stub.name().map(Arc::clone)
+   }
+
+   // KTODO: docs
+   pub fn unravel(&self)->Schema{
+       self.get_resolved().unravel()
+   }
 }
 
 impl From<&ResolvedNode<'_>> for SchemaKind {
@@ -685,8 +702,19 @@ impl From<&ResolvedNode<'_>> for SchemaKind {
     }
 }
 
+impl<'a> ResolvedRecord<'a>{
+    pub fn unravel(&self) -> RecordSchema{
+        let schema = ResolvedNode::Record(self.clone()).unravel();
+        if let Schema::Record(record_schema) = schema{
+            record_schema
+        }else{
+            unreachable!();
+        }
+    }
+}
+
 impl<'a> ResolvedMap<'a>{
-    pub fn resolve_types(&'a self)->ResolvedNode<'a>{
+    pub fn resolve_types(&self)->ResolvedNode<'a>{
        ResolvedNode::from_schema(self.types, self.root)
     }
 }
@@ -707,7 +735,7 @@ impl<'a> ResolvedUnion<'a>{
     pub fn structural_match_on_schema(&'a self, value: &types::Value) -> Option<(usize,ResolvedNode<'a>)>{
         let value_schema_kind = SchemaKind::from(value);
         let resolved_nodes = self.resolve_schemas();
-        if let Some(i) = self.get_variant_index(&value_schema_kind) {
+        if let Some(i) = self.index_of_schema_kind(&value_schema_kind) {
             // fast path
             let variant_clone = resolved_nodes.get(i).unwrap().clone();
             if value
@@ -729,8 +757,59 @@ impl<'a> ResolvedUnion<'a>{
         }
     }
 
-    pub fn get_variant_index(&self, schema_kind: &SchemaKind) -> Option<usize>{
-       self.variant_index.get(schema_kind).copied()
+    pub fn index_of_schema_kind<K: Borrow<SchemaKind>>(&self, schema_kind: K) -> Option<usize>{
+       self.variant_index.get(schema_kind.borrow()).copied()
+    }
+
+    /// Get the index and schema for the provided Rust type name.
+    ///
+    /// This ignores the namespace of schemas.
+    pub(crate) fn find_named_schema<'s>(
+        &'s self,
+        name: &str,
+    ) -> Option<(usize, ResolvedNode<'a>)> {
+        self.resolve_schemas().into_iter().enumerate().find(|(_index, node)|{
+            node.get_name()
+                .is_some_and(|schema_name|{schema_name.name() == name})
+        })
+    }
+
+    /// Find a [`Schema::Fixed`] with the given size.
+    pub(crate) fn find_fixed_of_size_n<'s>(
+        &'s self,
+        size: usize,
+    ) -> Option<(usize, &'s FixedSchema)> {
+        self.resolve_schemas().into_iter().enumerate().find_map(|(index, node)|{
+            match node {
+                ResolvedNode::Fixed(fixed)
+                | ResolvedNode::Uuid(UuidSchema::Fixed(fixed))
+                | ResolvedNode::Decimal(DecimalSchema {
+                    inner: InnerDecimalSchema::Fixed(fixed),
+                    ..
+                })
+                | ResolvedNode::Duration(fixed)
+                    if fixed.size == size =>
+                {
+                    Some((index, fixed))
+                }
+                _ => {None}
+            }
+        })
+    }
+
+    /// Find a [`Schema::Record`] with `n` fields.
+    pub(crate) fn find_record_with_n_fields<'s>(
+        &'s self,
+        n_fields: usize,
+    ) -> Option<(usize, ResolvedRecord<'s>)> {
+        self.resolve_schemas().into_iter().enumerate().find_map(|(index, node)|{
+            match node {
+                ResolvedNode::Record(record) if record.fields.len() == n_fields => {
+                    Some((index, record))
+                }
+                _ => {None}
+            }
+        })
     }
 }
 

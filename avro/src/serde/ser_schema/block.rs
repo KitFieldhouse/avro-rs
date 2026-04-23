@@ -26,7 +26,7 @@ use super::{Config, SchemaAwareSerializer};
 use crate::{
     Error, Schema,
     error::Details,
-    schema::{ArraySchema, MapSchema},
+    schema::{ArraySchema, MapSchema, ResolvedArray, ResolvedMap, ResolvedNode},
     util::zig_i64,
 };
 
@@ -34,48 +34,36 @@ use crate::{
     private_interfaces,
     reason = "Direct and Buffered should not be used directly"
 )]
-pub enum BlockSerializer<'s, 'w, W: Write, S: Borrow<Schema>> {
-    Direct(DirectBlockSerializer<'s, 'w, W, S>),
-    Buffered(BufferedBlockSerializer<'s, 'w, W, S>),
+pub enum BlockSerializer<'s, 'w, W: Write> {
+    Direct(DirectBlockSerializer<'s, 'w, W>),
+    Buffered(BufferedBlockSerializer<'s, 'w, W>),
 }
 
-impl<'s, 'w, W: Write, S: Borrow<Schema>> BlockSerializer<'s, 'w, W, S> {
+impl<'s, 'w, W: Write> BlockSerializer<'s, 'w, W> {
     pub fn array(
         writer: &'w mut W,
-        schema: &'s ArraySchema,
-        config: Config<'s, S>,
+        schema: ResolvedArray<'s>,
+        config: Config,
         len: Option<usize>,
         bytes_written: Option<usize>,
     ) -> Result<Self, Error> {
-        let schema = if let Schema::Ref { name } = schema.items.as_ref() {
-            config.get_schema(name)?
-        } else {
-            &schema.items
-        };
-
-        Self::new(writer, schema, config, len, bytes_written)
+        Self::new(writer, schema.resolve_items(), config, len, bytes_written)
     }
 
     pub fn map(
         writer: &'w mut W,
-        schema: &'s MapSchema,
-        config: Config<'s, S>,
+        schema: ResolvedMap<'s>,
+        config: Config,
         len: Option<usize>,
         bytes_written: Option<usize>,
     ) -> Result<Self, Error> {
-        let schema = if let Schema::Ref { name } = schema.types.as_ref() {
-            config.get_schema(name)?
-        } else {
-            &schema.types
-        };
-
-        Self::new(writer, schema, config, len, bytes_written)
+        Self::new(writer, schema.resolve_types(), config, len, bytes_written)
     }
 
     fn new(
         writer: &'w mut W,
-        schema: &'s Schema,
-        config: Config<'s, S>,
+        schema: ResolvedNode<'s>,
+        config: Config,
         len: Option<usize>,
         bytes_written: Option<usize>,
     ) -> Result<Self, Error> {
@@ -103,7 +91,7 @@ impl<'s, 'w, W: Write, S: Borrow<Schema>> BlockSerializer<'s, 'w, W, S> {
     }
 }
 
-impl<'s, 'w, W: Write, S: Borrow<Schema>> SerializeSeq for BlockSerializer<'s, 'w, W, S> {
+impl<'s, 'w, W: Write> SerializeSeq for BlockSerializer<'s, 'w, W> {
     type Ok = usize;
     type Error = Error;
 
@@ -125,7 +113,7 @@ impl<'s, 'w, W: Write, S: Borrow<Schema>> SerializeSeq for BlockSerializer<'s, '
     }
 }
 
-impl<'s, 'w, W: Write, S: Borrow<Schema>> SerializeMap for BlockSerializer<'s, 'w, W, S> {
+impl<'s, 'w, W: Write> SerializeMap for BlockSerializer<'s, 'w, W> {
     type Ok = usize;
     type Error = Error;
 
@@ -157,18 +145,18 @@ impl<'s, 'w, W: Write, S: Borrow<Schema>> SerializeMap for BlockSerializer<'s, '
     }
 }
 
-struct DirectBlockSerializer<'s, 'w, W: Write, S: Borrow<Schema>> {
+struct DirectBlockSerializer<'s, 'w, W: Write> {
     writer: &'w mut W,
-    schema: &'s Schema,
-    config: Config<'s, S>,
+    schema: ResolvedNode<'s>,
+    config: Config,
     bytes_written: usize,
 }
 
-impl<'s, 'w, W: Write, S: Borrow<Schema>> DirectBlockSerializer<'s, 'w, W, S> {
+impl<'s, 'w, W: Write> DirectBlockSerializer<'s, 'w, W> {
     pub fn new(
         writer: &'w mut W,
-        schema: &'s Schema,
-        config: Config<'s, S>,
+        schema: ResolvedNode<'s>,
+        config: Config,
         len: usize,
         mut bytes_written: usize,
     ) -> Result<Self, Error> {
@@ -193,7 +181,7 @@ impl<'s, 'w, W: Write, S: Borrow<Schema>> DirectBlockSerializer<'s, 'w, W, S> {
     }
 }
 
-impl<'s, 'w, W: Write, S: Borrow<Schema>> SerializeSeq for DirectBlockSerializer<'s, 'w, W, S> {
+impl<'s, 'w, W: Write> SerializeSeq for DirectBlockSerializer<'s, 'w, W> {
     type Ok = usize;
     type Error = Error;
 
@@ -203,7 +191,7 @@ impl<'s, 'w, W: Write, S: Borrow<Schema>> SerializeSeq for DirectBlockSerializer
     {
         self.bytes_written += value.serialize(SchemaAwareSerializer::new(
             self.writer,
-            self.schema,
+            self.schema.clone(),
             self.config,
         )?)?;
         Ok(())
@@ -214,7 +202,7 @@ impl<'s, 'w, W: Write, S: Borrow<Schema>> SerializeSeq for DirectBlockSerializer
     }
 }
 
-impl<'s, 'w, W: Write, S: Borrow<Schema>> SerializeMap for DirectBlockSerializer<'s, 'w, W, S> {
+impl<'s, 'w, W: Write> SerializeMap for DirectBlockSerializer<'s, 'w, W> {
     type Ok = usize;
     type Error = Error;
 
@@ -224,7 +212,7 @@ impl<'s, 'w, W: Write, S: Borrow<Schema>> SerializeMap for DirectBlockSerializer
     {
         self.bytes_written += key.serialize(SchemaAwareSerializer::new(
             self.writer,
-            &Schema::String,
+            ResolvedNode::String,
             self.config,
         )?)?;
         Ok(())
@@ -242,21 +230,21 @@ impl<'s, 'w, W: Write, S: Borrow<Schema>> SerializeMap for DirectBlockSerializer
     }
 }
 
-struct BufferedBlockSerializer<'s, 'w, W: Write, S: Borrow<Schema>> {
+struct BufferedBlockSerializer<'s, 'w, W: Write> {
     writer: &'w mut W,
     buffer: Vec<u8>,
-    schema: &'s Schema,
-    config: Config<'s, S>,
+    schema: ResolvedNode<'s>,
+    config: Config,
     bytes_written: usize,
     items_in_buffer: i64,
     target_block_size: usize,
 }
 
-impl<'s, 'w, W: Write, S: Borrow<Schema>> BufferedBlockSerializer<'s, 'w, W, S> {
+impl<'s, 'w, W: Write> BufferedBlockSerializer<'s, 'w, W> {
     pub fn new(
         writer: &'w mut W,
-        schema: &'s Schema,
-        config: Config<'s, S>,
+        schema: ResolvedNode<'s>,
+        config: Config,
         target_block_size: usize,
         bytes_written: usize,
     ) -> Self {
@@ -305,7 +293,7 @@ impl<'s, 'w, W: Write, S: Borrow<Schema>> BufferedBlockSerializer<'s, 'w, W, S> 
     }
 }
 
-impl<'s, 'w, W: Write, S: Borrow<Schema>> SerializeSeq for BufferedBlockSerializer<'s, 'w, W, S> {
+impl<'s, 'w, W: Write> SerializeSeq for BufferedBlockSerializer<'s, 'w, W> {
     type Ok = usize;
     type Error = Error;
 
@@ -315,7 +303,7 @@ impl<'s, 'w, W: Write, S: Borrow<Schema>> SerializeSeq for BufferedBlockSerializ
     {
         value.serialize(SchemaAwareSerializer::new(
             &mut self.buffer,
-            self.schema,
+            self.schema.clone(),
             self.config,
         )?)?;
         self.items_in_buffer += 1;
@@ -331,7 +319,7 @@ impl<'s, 'w, W: Write, S: Borrow<Schema>> SerializeSeq for BufferedBlockSerializ
     }
 }
 
-impl<'s, 'w, W: Write, S: Borrow<Schema>> SerializeMap for BufferedBlockSerializer<'s, 'w, W, S> {
+impl<'s, 'w, W: Write> SerializeMap for BufferedBlockSerializer<'s, 'w, W> {
     type Ok = usize;
     type Error = Error;
 
@@ -341,7 +329,7 @@ impl<'s, 'w, W: Write, S: Borrow<Schema>> SerializeMap for BufferedBlockSerializ
     {
         key.serialize(SchemaAwareSerializer::new(
             &mut self.buffer,
-            &Schema::String,
+            ResolvedNode::String,
             self.config,
         )?)?;
         Ok(())

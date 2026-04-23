@@ -106,6 +106,7 @@ impl UnionSchema {
     /// This ignores the namespace of schemas.
     ///
     /// Will use `names` to resolve references.
+    // KTODO: get rid of??
     pub(crate) fn find_named_schema<'s>(
         &'s self,
         name: &str,
@@ -133,6 +134,7 @@ impl UnionSchema {
     /// Find a [`Schema::Fixed`] with the given size.
     ///
     /// Will use `names` to resolve references.
+    //KTODO: get rid of?
     pub(crate) fn find_fixed_of_size_n<'s>(
         &'s self,
         size: usize,
@@ -169,6 +171,7 @@ impl UnionSchema {
     /// Find a [`Schema::Record`] with `n` fields.
     ///
     /// Will use `names` to resolve references.
+    // KTODO: get rid of??
     pub(crate) fn find_record_with_n_fields<'s>(
         &'s self,
         n_fields: usize,

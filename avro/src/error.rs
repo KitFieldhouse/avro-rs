@@ -591,7 +591,7 @@ pub enum Details {
     #[error("{position} is not a valid index for fields in {schema:?}")]
     SerializeRecordUnknownFieldIndex {
         position: usize,
-        schema: RecordSchema,
+        schema: Schema,
     },
 
     #[error("Failed to serialize field '{field_name}' of record {record_schema:?}: {error}")]

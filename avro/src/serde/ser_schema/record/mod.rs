@@ -28,16 +28,16 @@ use super::{Config, SchemaAwareSerializer};
 use crate::{
     Error, Schema,
     error::Details,
-    schema::RecordSchema,
+    schema::{RecordSchema, ResolvedRecord},
     serde::{
         ser_schema::record::field_default::SchemaAwareRecordFieldDefault, util::StringSerializer,
     },
 };
 
-pub struct RecordSerializer<'s, 'w, W: Write, S: Borrow<Schema>> {
+pub struct RecordSerializer<'s, 'w, W: Write> {
     writer: &'w mut W,
-    record: &'s RecordSchema,
-    config: Config<'s, S>,
+    record: ResolvedRecord<'s>,
+    config: Config,
     /// Cache fields received out-of-order
     cache: HashMap<usize, Vec<u8>>,
     /// The position of the current map entry being written
@@ -47,11 +47,11 @@ pub struct RecordSerializer<'s, 'w, W: Write, S: Borrow<Schema>> {
     bytes_written: usize,
 }
 
-impl<'s, 'w, W: Write, S: Borrow<Schema>> RecordSerializer<'s, 'w, W, S> {
+impl<'s, 'w, W: Write> RecordSerializer<'s, 'w, W> {
     pub fn new(
         writer: &'w mut W,
-        record: &'s RecordSchema,
-        config: Config<'s, S>,
+        record: ResolvedRecord<'s>,
+        config: Config,
         bytes_written: Option<usize>,
     ) -> Self {
         Self {
@@ -91,7 +91,7 @@ impl<'s, 'w, W: Write, S: Borrow<Schema>> RecordSerializer<'s, 'w, W, S> {
         };
         Error::new(Details::SerializeRecordFieldWithSchema {
             field_name: field.name.clone(),
-            record_schema: self.record.clone(),
+            record_schema: self.record.unravel(),
             error,
         })
     }
@@ -108,7 +108,7 @@ impl<'s, 'w, W: Write, S: Borrow<Schema>> RecordSerializer<'s, 'w, W, S> {
                 self.bytes_written += value
                     .serialize(SchemaAwareSerializer::new(
                         self.writer,
-                        &field.schema,
+                        field.resolve_field(),
                         self.config,
                     )?)
                     .map_err(|e| self.field_error(self.field_position, e))?;
@@ -129,7 +129,7 @@ impl<'s, 'w, W: Write, S: Borrow<Schema>> RecordSerializer<'s, 'w, W, S> {
                 value
                     .serialize(SchemaAwareSerializer::new(
                         &mut bytes,
-                        &field.schema,
+                        field.resolve_field(),
                         self.config,
                     )?)
                     .map_err(|e| self.field_error(position, e))?;
@@ -157,7 +157,7 @@ impl<'s, 'w, W: Write, S: Borrow<Schema>> RecordSerializer<'s, 'w, W, S> {
         } else {
             Err(Details::MissingDefaultForSkippedField {
                 field_name: field.name.clone(),
-                schema: self.record.clone(),
+                schema: self.record.unravel(),
             }
             .into())
         }
@@ -173,7 +173,7 @@ impl<'s, 'w, W: Write, S: Borrow<Schema>> RecordSerializer<'s, 'w, W, S> {
     }
 }
 
-impl<'s, 'w, W: Write, S: Borrow<Schema>> SerializeStruct for RecordSerializer<'s, 'w, W, S> {
+impl<'s, 'w, W: Write> SerializeStruct for RecordSerializer<'s, 'w, W> {
     type Ok = usize;
     type Error = Error;
 
@@ -201,7 +201,7 @@ impl<'s, 'w, W: Write, S: Borrow<Schema>> SerializeStruct for RecordSerializer<'
     }
 }
 
-impl<'s, 'w, W: Write, S: Borrow<Schema>> SerializeMap for RecordSerializer<'s, 'w, W, S> {
+impl<'s, 'w, W: Write> SerializeMap for RecordSerializer<'s, 'w, W> {
     type Ok = usize;
     type Error = Error;
 
@@ -247,8 +247,7 @@ impl<'s, 'w, W: Write, S: Borrow<Schema>> SerializeMap for RecordSerializer<'s, 
     }
 }
 
-impl<'s, 'w, W: Write, S: Borrow<Schema>> SerializeStructVariant
-    for RecordSerializer<'s, 'w, W, S>
+impl<'s, 'w, W: Write> SerializeStructVariant for RecordSerializer<'s, 'w, W>
 {
     type Ok = usize;
     type Error = Error;
