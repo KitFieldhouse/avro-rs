@@ -5485,4 +5485,211 @@ mod tests {
 
         Ok(())
     }
+
+    #[test]
+    fn avro_rs_unraveling_does_not_double_define_names_enum() -> TestResult{
+        let schema = Schema::parse_str(r#"
+                     {
+                         "type": "record",
+                         "name": "TestRecord",
+                         "fields": [{
+                                 "name": "field_0",
+                                 "type": {
+                                     "type": "enum",
+                                     "name": "ReferencedEnum",
+                                     "symbols": ["A", "B", "C"]
+                                 }
+                             },
+                             {
+                                 "name": "field_1",
+                                 "type": "ReferencedEnum"
+                             }
+                         ]
+                     }
+                     "#)?;
+
+        let target_schema = Schema::Record(
+            RecordSchema::builder()
+            .name(Name::try_from("TestRecord")?.into())
+            .fields(vec![
+                RecordField::builder()
+                .name("field_0")
+                .schema(
+                    Schema::Enum(
+                        EnumSchema::builder()
+                        .name(Name::try_from("ReferencedEnum")?.into())
+                        .symbols(vec!["A".to_string(), "B".to_string(), "C".to_string()])
+                        .build()
+                    )
+                ).build()
+                ,
+                RecordField::builder()
+                .name("field_1")
+                .schema(Schema::Ref { name: Name::new("ReferencedEnum")?.into()})
+                .build()
+            ])
+            .build()
+         );
+
+        assert_eq!(schema,target_schema);
+
+        Ok(())
+    }
+
+    #[test]
+    fn avro_rs_unraveling_does_not_double_define_names_fixed() -> TestResult{
+        let schema = Schema::parse_str(r#"
+                     {
+                         "type": "record",
+                         "name": "TestRecord",
+                         "fields": [{
+                                 "name": "field_0",
+                                 "type": {
+                                     "type": "fixed",
+                                     "name": "ReferencedFixed",
+                                     "size": 8
+                                 }
+                             },
+                             {
+                                 "name": "field_1",
+                                 "type": "ReferencedFixed"
+                             }
+                         ]
+                     }
+                     "#)?;
+
+        let target_schema = Schema::Record(
+            RecordSchema::builder()
+            .name(Name::try_from("TestRecord")?.into())
+            .fields(vec![
+                RecordField::builder()
+                .name("field_0")
+                .schema(
+                    Schema::Fixed(
+                        FixedSchema::builder()
+                        .name(Name::try_from("ReferencedFixed")?.into())
+                        .size(8)
+                        .build()
+                    )
+                ).build()
+                ,
+                RecordField::builder()
+                .name("field_1")
+                .schema(Schema::Ref { name: Name::new("ReferencedFixed")?.into()})
+                .build()
+            ])
+            .build()
+         );
+
+        assert_eq!(schema,target_schema);
+
+        Ok(())
+    }
+
+    #[test]
+    fn avro_rs_unraveling_does_not_double_define_logical_names_decimal_fixed() -> TestResult{
+        let schema = Schema::parse_str(r#"
+                     {
+                         "type": "record",
+                         "name": "TestRecord",
+                         "fields": [{
+                                 "name": "field_0",
+                                 "type": {
+                                     "type": "fixed",
+                                     "logicalType": "decimal",
+                                     "name": "ReferencedDecimal",
+                                     "size": 8,
+                                     "precision": 4
+                                 }
+                             },
+                             {
+                                 "name": "field_1",
+                                 "type": "ReferencedDecimal"
+                             }
+                         ]
+                     }
+                     "#)?;
+
+        let target_schema = Schema::Record(
+            RecordSchema::builder()
+            .name(Name::try_from("TestRecord")?.into())
+            .fields(vec![
+                RecordField::builder()
+                .name("field_0")
+                .schema(
+                    Schema::Decimal(DecimalSchema {
+                        precision: 4,
+                        scale: 0,
+                        inner: InnerDecimalSchema::Fixed(
+                            FixedSchema::builder()
+                            .name(Name::try_from("ReferencedDecimal")?.into())
+                            .size(8)
+                            .build()
+                        ),
+                    })
+                ).build()
+                ,
+                RecordField::builder()
+                .name("field_1")
+                .schema(Schema::Ref { name: Name::new("ReferencedDecimal")?.into()})
+                .build()
+            ])
+            .build()
+         );
+
+        assert_eq!(schema,target_schema);
+
+        Ok(())
+    }
+
+    #[test]
+    fn avro_rs_unraveling_does_not_double_define_logical_names_duration() -> TestResult{
+        let schema = Schema::parse_str(r#"
+                     {
+                         "type": "record",
+                         "name": "TestRecord",
+                         "fields": [{
+                                 "name": "field_0",
+                                 "type": {
+                                     "type": "fixed",
+                                     "logicalType": "duration",
+                                     "name": "ReferencedDuration",
+                                     "size": 12
+                                 }
+                             },
+                             {
+                                 "name": "field_1",
+                                 "type": "ReferencedDuration"
+                             }
+                         ]
+                     }
+                     "#)?;
+
+        let target_schema = Schema::Record(
+            RecordSchema::builder()
+            .name(Name::try_from("TestRecord")?.into())
+            .fields(vec![
+                RecordField::builder()
+                .name("field_0")
+                .schema(
+                    Schema::Duration(
+                        FixedSchema::builder()
+                        .name(Name::try_from("ReferencedDuration")?.into())
+                        .size(12)
+                        .build()
+                    )
+                ).build()
+                ,
+                RecordField::builder()
+                .name("field_1")
+                .schema(Schema::Ref { name: Name::new("ReferencedDuration")?.into()})
+                .build()
+            ])
+            .build()
+         );
+
+        assert_eq!(schema,target_schema);
+
+        Ok(())
+    }
 }
