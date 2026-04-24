@@ -498,12 +498,12 @@ pub struct ResolvedMap<'a>{
 }
 
 /// An Avro union that makes a type level promise that the schemata it contains are all fully resolved.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Copy)]
 pub struct ResolvedUnion<'a>{
     pub variant_index: &'a BTreeMap<SchemaKind, usize>,
 
     union_schema: &'a UnionSchema,
-    schemas: &'a Vec<Schema>,
+    schemas: &'a[Schema],
     root: &'a ResolvedSchema,
 
     schema: &'a Schema
@@ -518,7 +518,7 @@ pub struct ResolvedRecord<'a>{
     pub doc: &'a Documentation,
     pub lookup: &'a BTreeMap<String, usize>,
     pub attributes: &'a BTreeMap<String, JsonValue>,
-    pub fields: Vec<ResolvedRecordField<'a>>,
+    pub fields: Arc<[ResolvedRecordField<'a>]>,
 
     root: &'a ResolvedSchema,
 
@@ -532,7 +532,7 @@ pub struct ResolvedRecordField<'a>{
     pub name: &'a String,
     pub doc: &'a Documentation,
     pub aliases: &'a Vec<String>,
-    pub default: Option<crate::types::Value>,
+    pub default: Arc<Option<crate::types::Value>>,
     pub custom_attributes: &'a BTreeMap<String, JsonValue>,
 
     record_field: &'a RecordField,
@@ -585,16 +585,16 @@ impl<'a> ResolvedNode<'a> {
         Schema::Union(union_schema) => ResolvedNode::Union(ResolvedUnion{union_schema, schemas: &union_schema.schemas, variant_index: &union_schema.variant_index, root,schema}),
         Schema::Array(ArraySchema { items, attributes }) => ResolvedNode::Array(ResolvedArray{items, attributes, root,schema}),
         Schema::Record(RecordSchema { name, aliases, doc, fields, lookup, attributes }) => {
-            let fields = fields.iter()
+            let fields : Vec<_> = fields.iter()
                 .map(|field|{
                     let RecordField {name, doc, aliases, default, schema, custom_attributes} = field;
                     let default_value = default.as_ref().map(|json_value|{
                         crate::types::Value::try_from(json_value.clone())
                         .expect("unable to resolve defualt json value into value. This is an internal error and should never be reached.")
                     });
-                    ResolvedRecordField{name, doc, aliases, default: default_value, schema, custom_attributes, record_field: field, root}
+                    ResolvedRecordField{name, doc, aliases, default: default_value.into(), schema, custom_attributes, record_field: field, root}
                 }).collect();
-            ResolvedNode::Record(ResolvedRecord{ name, aliases, doc, fields, lookup, attributes, root, schema})
+            ResolvedNode::Record(ResolvedRecord{ name, aliases, doc, fields: fields.into(), lookup, attributes, root, schema})
         },
         Schema::Ref{name} => Self::from_schema(root.context.0.get(name).unwrap().as_ref(), root),
         Schema::Null => ResolvedNode::Null,
@@ -810,6 +810,21 @@ impl<'a> ResolvedUnion<'a>{
                 _ => {None}
             }
         })
+    }
+
+    pub fn get_variant(&self, index: usize)->AvroResult<ResolvedNode<'a>>{
+        self.resolve_schemas().get(index).cloned().ok_or_else(|| {
+            Details::GetUnionVariant {
+                index: index as i64,
+                num_variants: self.schemas.len(),
+            }
+            .into()
+        })
+    }
+
+    /// Returns true if any of the variants of this `ResolvedUnion` is `Null`.
+    pub fn is_nullable(&self) -> bool {
+        self.union_schema.is_nullable()
     }
 }
 
