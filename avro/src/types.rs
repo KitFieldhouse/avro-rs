@@ -710,7 +710,7 @@ impl Value {
             }
             ResolvedNode::Map(resolved_map) => self.resolve_map(resolved_map),
             ResolvedNode::Record(resolved_record) => {
-                self.resolve_record(resolved_record)
+                self.resolve_record(&resolved_record)
             }
         }
     }
@@ -1111,7 +1111,7 @@ impl Value {
 
     fn resolve_record(
         self,
-        resolved_record: ResolvedRecord
+        resolved_record: &ResolvedRecord
     ) -> Result<Self, Error> {
         let mut items = match self {
             Value::Map(items) => Ok(items),
