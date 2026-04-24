@@ -286,14 +286,13 @@ impl<'a, W: Write> Writer<'a, W> {
         let n = self.maybe_write_header()?;
 
         let config = Config {
-            names: self.resolved_schema.get_names(),
             target_block_size: self.map_array_target_block_size,
             human_readable: self.human_readable,
         };
 
         value.serialize(SchemaAwareSerializer::new(
             &mut self.buffer,
-            self.schema,
+            ResolvedNode::new(&self.resolved_schema),
             config,
         )?)?;
         self.num_values += 1;

@@ -23,7 +23,7 @@ use serde::de::DeserializeOwned;
 use crate::{
     AvroResult, AvroSchema, Schema,
     decode::decode_internal,
-    schema::{ResolvedOwnedSchema, ResolvedSchema},
+    schema::{ResolvedNode, ResolvedSchema},
     serde::deser_schema::{Config, SchemaAwareDeserializer},
     types::Value,
     util::is_human_readable,
@@ -189,7 +189,7 @@ impl<'s> GenericDatumReader<'s> {
 /// [`GenericSingleObjectReader`][crate::GenericSingleObjectReader], or
 /// [`SpecificSingleObjectReader`][crate::SpecificSingleObjectReader] instead.
 pub struct SpecificDatumReader<T: AvroSchema> {
-    resolved: ResolvedOwnedSchema,
+    resolved: ResolvedSchema,
     human_readable: bool,
     phantom: PhantomData<T>,
 }

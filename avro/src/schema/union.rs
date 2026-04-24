@@ -26,13 +26,12 @@ use crate::{AvroResult, Error};
 use strum::IntoDiscriminant;
 
 use crate::{
-    AvroResult, Error,
     error::Details,
     schema::{
-        DecimalSchema, FixedSchema, InnerDecimalSchema, Name, NamespaceRef, RecordSchema, Schema,
+        DecimalSchema, FixedSchema, InnerDecimalSchema,
+        Name, RecordSchema, Schema,
         SchemaKind, UuidSchema,
     },
-    types,
 };
 
 /// A description of a Union schema
@@ -120,7 +119,7 @@ impl UnionSchema {
                 let schema = if let Schema::Ref { name } = schema {
                     names
                         .get(name)
-                        .ok_or_else(|| Details::SchemaResolutionError(name.clone()))?
+                        .ok_or_else(|| Details::SchemaResolutionError(name.as_ref().clone()))?
                         .borrow()
                 } else {
                     schema
@@ -145,7 +144,7 @@ impl UnionSchema {
             let schema = if let Schema::Ref { name } = schema {
                 names
                     .get(name)
-                    .ok_or_else(|| Details::SchemaResolutionError(name.clone()))?
+                    .ok_or_else(|| Details::SchemaResolutionError(name.as_ref().clone()))?
                     .borrow()
             } else {
                 schema
@@ -182,7 +181,7 @@ impl UnionSchema {
             let schema = if let Schema::Ref { name } = schema {
                 names
                     .get(name)
-                    .ok_or_else(|| Details::SchemaResolutionError(name.clone()))?
+                    .ok_or_else(|| Details::SchemaResolutionError(name.as_ref().clone()))?
                     .borrow()
             } else {
                 schema

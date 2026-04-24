@@ -15,9 +15,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-mod field_default;
-
-use std::{borrow::Borrow, cmp::Ordering, collections::HashMap, io::Write};
+use std::{cmp::Ordering, collections::HashMap, io::Write};
 
 use serde::{
     Serialize,
@@ -26,11 +24,11 @@ use serde::{
 
 use super::{Config, SchemaAwareSerializer};
 use crate::{
-    Error, Schema,
+    Error,
     error::Details,
-    schema::{RecordSchema, ResolvedRecord},
+    schema::ResolvedRecord,
     serde::{
-        ser_schema::record::field_default::SchemaAwareRecordFieldDefault, util::StringSerializer,
+        ser_schema::avro_value::AvroValueSerialize, util::StringSerializer
     },
 };
 
@@ -147,11 +145,11 @@ impl<'s, 'w, W: Write> RecordSerializer<'s, 'w, W> {
     }
 
     fn serialize_default(&mut self, position: usize) -> Result<(), Error> {
-        let field = &self.record.fields[position];
+        let field = self.record.fields[position].clone();
         if let Some(default) = &field.default {
             self.serialize_next_field(
                 position,
-                &SchemaAwareRecordFieldDefault::new(default, &field.schema),
+                &AvroValueSerialize::new(default),
             )
             .map_err(|e| self.field_error(position, e))
         } else {

@@ -814,7 +814,7 @@ impl<const N: usize, T: AvroSchemaComponent> AvroSchemaComponent for [T; N] {
             )
             .expect("Name is valid");
             if named_schemas.contains(&name) {
-                Schema::Ref { name }
+                Schema::Ref { name: name.into() }
             } else {
                 named_schemas.insert(name.clone());
 
@@ -925,7 +925,7 @@ macro_rules! tuple_impls {
                     let name = Name::new_with_enclosing_namespace(name, enclosing_namespace).expect("Name is valid");
 
                     if named_schemas.contains(&name) {
-                        Schema::Ref { name }
+                        Schema::Ref { name: name.into() }
                     } else {
                         named_schemas.insert(name.clone());
 

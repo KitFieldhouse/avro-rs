@@ -23,7 +23,7 @@ use crate::{
     AvroResult, Schema,
     encode::encode_internal,
     error::Details,
-    schema::{NameMap, ResolvedNode, ResolvedSchema},
+    schema::{ResolvedNode, ResolvedSchema},
     serde::ser_schema::{Config, SchemaAwareSerializer},
     types::Value,
     util::is_human_readable,
@@ -147,11 +147,10 @@ impl GenericDatumWriter<'_> {
         value: &T,
     ) -> AvroResult<usize> {
         let config = Config {
-            names: self.resolved.get_names(),
             target_block_size: self.target_block_size,
             human_readable: self.human_readable,
         };
-        value.serialize(SchemaAwareSerializer::new(writer, self.schema, config)?)
+        value.serialize(SchemaAwareSerializer::new(writer, ResolvedNode::new(&self.resolved), config)?)
     }
 
     /// Serialize `T` to a [`Vec`].
@@ -197,17 +196,15 @@ pub fn to_avro_datum<T: Into<Value>>(schema: &Schema, value: T) -> AvroResult<Ve
 ///
 /// [`Writer::append_ser`]: crate::Writer::append_ser
 pub fn write_avro_datum_ref<T: Serialize, W: Write>(
-    schema: &Schema,
-    names: &NameMap,
+    schema: &ResolvedSchema,
     data: &T,
     writer: &mut W,
 ) -> AvroResult<usize> {
     let config = Config {
-        names,
         target_block_size: None,
         human_readable: is_human_readable(),
     };
-    data.serialize(SchemaAwareSerializer::new(writer, schema, config)?)
+    data.serialize(SchemaAwareSerializer::new(writer, ResolvedNode::new(schema), config)?)
 }
 
 /// Deprecated. Use [`GenericDatumWriter`] instead.

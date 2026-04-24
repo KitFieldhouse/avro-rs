@@ -15,7 +15,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-use std::{borrow::Borrow, io::Write};
+use std::{io::Write};
 
 use serde::{
     Serialize,
@@ -24,9 +24,9 @@ use serde::{
 
 use super::{Config, SchemaAwareSerializer};
 use crate::{
-    Error, Schema,
+    Error,
     error::Details,
-    schema::{ArraySchema, MapSchema, ResolvedArray, ResolvedMap, ResolvedNode},
+    schema::{ResolvedArray, ResolvedMap, ResolvedNode},
     util::zig_i64,
 };
 

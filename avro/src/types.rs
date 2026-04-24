@@ -3043,7 +3043,6 @@ mod tests {
 
         let resolve_result = avro_value.resolve_against_resolved(rs.clone())?;
 
-        let schemata_ref = schemata.iter().collect::<Vec<_>>();
         assert!(
             resolve_result.validate_against_resolved(&rs),
             "result of validation with schemata should be true"

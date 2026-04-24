@@ -232,7 +232,8 @@ impl<'r, R: Read> Block<'r, R> {
             panic!("Schema aware deserialisation does not resolve schemas yet");
         } else {
             let config = Config {
-                names: &self.names_refs,
+                names: &self.names_refs, // KTODO -- need to patch this up like a did the "ser"
+                                         // side of things
                 human_readable: self.human_readable,
             };
             T::deserialize(SchemaAwareDeserializer::new(

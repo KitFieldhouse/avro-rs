@@ -23,7 +23,7 @@ mod tuple;
 mod union;
 mod avro_value;
 
-use std::{borrow::Borrow, collections::HashMap, io::Write};
+use std::{io::Write};
 
 use block::BlockSerializer;
 use record::RecordSerializer;
@@ -31,13 +31,12 @@ use serde::{Serialize, Serializer, ser::SerializeMap};
 use serde_json::Value::Bool;
 use tuple::{ManyTupleSerializer, TupleSerializer};
 use union::UnionSerializer;
-use avro_value::AvroValueSerialize;
 
 use crate::{
-    Error, Schema,
+    Error,
     error::Details,
     schema::{
-        DecimalSchema, InnerDecimalSchema, MapSchema, Name, RecordSchema, ResolvedMap, ResolvedNode, ResolvedRecord, SchemaKind, UnionSchema, UuidSchema
+        DecimalSchema, InnerDecimalSchema,ResolvedMap, ResolvedNode, ResolvedRecord, SchemaKind, UuidSchema
     },
     util::{zig_i32, zig_i64},
 };
@@ -93,23 +92,9 @@ impl<'s, 'w, W: Write> SchemaAwareSerializer<'s, 'w, W> {
     /// Create a new serializer with the existing writer and config.
     ///
     /// This will resolve the schema if it is a reference.
-    // KTODO: can i get rid of this?
     fn with_different_schema(mut self, schema: ResolvedNode<'s>) -> Result<Self, Error> {
         self.schema = schema;
         Ok(self)
-    }
-
-    /// Get the schema at the given index of the union, resolving references.
-    // KTODO: can i get rid of this?
-    fn get_resolved_union_variant(
-        &self,
-        union: &'s UnionSchema,
-        index: u32,
-    ) -> Result<&'s Schema, Error> {
-        match union.get_variant(index as usize)? {
-            Schema::Ref { name } => self.config.get_schema(name),
-            schema => Ok(schema),
-        }
     }
 
     /// Write an integer to the writer.
@@ -717,7 +702,7 @@ mod tests {
     use crate::{
         Days, Duration, Millis, Months,
         decimal::Decimal,
-        schema::{FixedSchema, ResolvedSchema},
+        schema::{FixedSchema, ResolvedSchema, Schema, Name},
     };
 
     #[track_caller]

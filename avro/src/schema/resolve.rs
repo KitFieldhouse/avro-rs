@@ -775,10 +775,10 @@ impl<'a> ResolvedUnion<'a>{
     }
 
     /// Find a [`Schema::Fixed`] with the given size.
-    pub(crate) fn find_fixed_of_size_n<'s>(
-        &'s self,
+    pub(crate) fn find_fixed_of_size_n(
+        &self,
         size: usize,
-    ) -> Option<(usize, &'s FixedSchema)> {
+    ) -> Option<(usize, &'a FixedSchema)> {
         self.resolve_schemas().into_iter().enumerate().find_map(|(index, node)|{
             match node {
                 ResolvedNode::Fixed(fixed)
@@ -798,10 +798,10 @@ impl<'a> ResolvedUnion<'a>{
     }
 
     /// Find a [`Schema::Record`] with `n` fields.
-    pub(crate) fn find_record_with_n_fields<'s>(
-        &'s self,
+    pub(crate) fn find_record_with_n_fields(
+        &self,
         n_fields: usize,
-    ) -> Option<(usize, ResolvedRecord<'s>)> {
+    ) -> Option<(usize, ResolvedRecord<'a>)> {
         self.resolve_schemas().into_iter().enumerate().find_map(|(index, node)|{
             match node {
                 ResolvedNode::Record(record) if record.fields.len() == n_fields => {

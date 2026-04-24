@@ -25,7 +25,7 @@ use crate::{
     decode::decode_internal,
     error::Details,
     headers::{HeaderBuilder, RabinFingerprintHeader},
-    schema::ResolvedOwnedSchema,
+    schema::{ResolvedSchema, ResolvedNode},
     serde::deser_schema::{Config, SchemaAwareDeserializer},
     types::Value,
     util::is_human_readable,
@@ -61,10 +61,8 @@ impl GenericSingleObjectReader {
     pub fn read_value<R: Read>(&self, reader: &mut R) -> AvroResult<Value> {
         self.read_header(reader)?;
         decode_internal(
-            self.write_schema.get_root_schema(),
-            self.write_schema.get_names(),
-            None,
-            reader,
+            ResolvedNode::new(&self.write_schema),
+            reader
         )
     }
 

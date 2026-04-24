@@ -25,7 +25,7 @@ use crate::encode::encode_internal;
 use crate::serde::ser_schema::{Config, SchemaAwareSerializer};
 use crate::util::is_human_readable;
 use crate::{
-    AvroResult, AvroSchema, Schema::{ResolvedNode, ResolvedSchema},
+    AvroResult, AvroSchema, schema::{Schema, ResolvedSchema, ResolvedNode},
     error::Details,
     headers::{HeaderBuilder, RabinFingerprintHeader},
     types::Value,
@@ -98,12 +98,12 @@ where
     T: AvroSchema,
 {
     #[builder(
-        with = |schema: Schema| -> Result<_, Error> { ResolvedSchema::new(schema) },
-        default = ResolvedSchema::new(T::get_schema()).expect("AvroSchema implementation should create valid schemas")
+        with = |schema: Schema| -> Result<_, Error> { ResolvedSchema::builder().build_one(schema) },
+        default = ResolvedSchema::builder().build_one(T::get_schema()).expect("AvroSchema implementation should create valid schemas")
     )]
     resolved: ResolvedSchema,
     #[builder(
-        default = RabinFingerprintHeader::from_schema(resolved.get_root_schema()).build_header(),
+        default = RabinFingerprintHeader::from_schema(&resolved.unravel()).build_header(),
         with = |header_builder: impl HeaderBuilder| header_builder.build_header(),
     )]
     header: Vec<u8>,
@@ -197,14 +197,13 @@ where
             .map_err(Details::WriteBytes)?;
 
         let config = Config {
-            names: self.resolved.get_names(),
             target_block_size: self.target_block_size,
             human_readable: self.human_readable,
         };
 
         let bytes = data.serialize(SchemaAwareSerializer::new(
             writer,
-            self.resolved.get_root_schema(),
+            ResolvedNode::new(&self.resolved),
             config,
         )?)?;
 

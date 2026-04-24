@@ -15,7 +15,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-use std::{borrow::Borrow, io::Write};
+use std::{io::Write};
 
 use serde::{Serialize, Serializer};
 
@@ -23,7 +23,7 @@ use super::{Config, MapOrRecordSerializer, SchemaAwareSerializer};
 use crate::{
     Error, Schema,
     error::Details,
-    schema::{FixedSchema, ResolvedNode, ResolvedUnion, SchemaKind, UnionSchema},
+    schema::{FixedSchema, ResolvedNode, ResolvedUnion, SchemaKind},
     serde::{
         ser_schema::{
             block::BlockSerializer,
@@ -397,7 +397,7 @@ impl<'s, 'w, W: Write> Serializer for UnionSerializer<'s, 'w, W> {
             && let ResolvedNode::Array(array) = &self.union.resolve_schemas()[index]
         {
             let bytes_written = zig_i32(index as i32, &mut *self.writer)?;
-            BlockSerializer::array(self.writer, array, self.config, len, Some(bytes_written))
+            BlockSerializer::array(self.writer, array.clone(), self.config, len, Some(bytes_written))
         } else {
             Err(self.error("array", "Expected Schema::Array in variants"))
         }
@@ -473,7 +473,7 @@ impl<'s, 'w, W: Write> Serializer for UnionSerializer<'s, 'w, W> {
     fn serialize_map(self, len: Option<usize>) -> Result<Self::SerializeMap, Self::Error> {
         let map_index = self.union.index_of_schema_kind(SchemaKind::Map).map(|i| {
             if let ResolvedNode::Map(map) = &self.union.resolve_schemas()[i] {
-                (i, map)
+                (i, map.clone())
             } else {
                 unreachable!("SchemaKind is Map so Schema must also be a Map")
             }
@@ -490,7 +490,7 @@ impl<'s, 'w, W: Write> Serializer for UnionSerializer<'s, 'w, W> {
                 if map_index < record_index {
                     MapOrRecordSerializer::map(
                         self.writer,
-                        map,
+                        map.clone(),
                         self.config,
                         len,
                         Some(bytes_written),
@@ -506,7 +506,7 @@ impl<'s, 'w, W: Write> Serializer for UnionSerializer<'s, 'w, W> {
             }
             (Some((map_index, map)), None) => {
                 let bytes_written = zig_i32(map_index as i32, &mut *self.writer)?;
-                MapOrRecordSerializer::map(self.writer, map, self.config, len, Some(bytes_written))
+                MapOrRecordSerializer::map(self.writer, map.clone(), self.config, len, Some(bytes_written))
             }
             (None, Some((record_index, record))) => {
                 let bytes_written = zig_i32(record_index as i32, &mut *self.writer)?;

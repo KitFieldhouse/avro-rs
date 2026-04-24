@@ -5200,16 +5200,16 @@ mod tests {
     #[test]
     fn avro_rs_512_unique_normalized_name_must_be_unique() -> TestResult {
         let one = Schema::Ref {
-            name: "a.b.c".parse()?,
+            name: Name::try_from("a.b.c")?.into(),
         };
         let two = Schema::Ref {
-            name: "a_b_c".parse()?,
+            name: Name::try_from("a_b_c")?.into(),
         };
         let three = Schema::Ref {
-            name: "a__b__c".parse()?,
+            name: Name::try_from("a__b__c")?.into(),
         };
         let four = Schema::Ref {
-            name: "a._b._c".parse()?,
+            name: Name::try_from("a._b._c")?.into(),
         };
 
         assert_ne!(one.unique_normalized_name(), two.unique_normalized_name());
