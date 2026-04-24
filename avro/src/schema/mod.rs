@@ -5387,4 +5387,102 @@ mod tests {
            assert!(schema.expect_err("Expected not to parse correctly!").into_details().to_string().contains("Only built-in type names as strings are allowed"));
            Ok(())
     }
+
+    #[test]
+    fn avro_rs_unraveling_does_not_double_define_names_record() -> TestResult{
+        let schema = Schema::parse_str(r#"
+                     {
+                         "type": "record",
+                         "name": "TestRecord",
+                         "fields": [{
+                                 "name": "field_0",
+                                 "type": {
+                                     "type": "record",
+                                     "name": "ReferencedRecord",
+                                     "fields": [{"name": "my_field", "type": "int"}]
+                                 }
+                             },
+                             {
+                                 "name": "field_1",
+                                 "type": "ReferencedRecord"
+                             }
+                         ]
+                     }
+                     "#)?;
+
+        let target_schema = Schema::Record(
+            RecordSchema::builder()
+            .name(Name::try_from("TestRecord")?.into())
+            .fields(vec![
+                RecordField::builder()
+                .name("field_0")
+                .schema(
+                 Schema::Record(
+                     RecordSchema::builder()
+                     .name(Name::try_from("ReferencedRecord")?.into())
+                     .fields(vec![
+                         RecordField::builder().name("my_field").schema(Schema::Int).build()
+                     ])
+                     .build()
+                 )
+                ).build()
+                ,
+                RecordField::builder()
+                .name("field_1")
+                .schema(Schema::Ref { name: Name::new("ReferencedRecord")?.into()})
+                .build()
+            ])
+            .build()
+         );
+
+        assert_eq!(schema,target_schema);
+
+        Ok(())
+    }
+
+    #[test]
+    fn avro_rs_unraveling_does_not_double_define_logical_names_uuid() -> TestResult{
+        let schema = Schema::parse_str(r#"
+                     {
+                         "type": "record",
+                         "name": "TestRecord",
+                         "fields": [{
+                                 "name": "field_0",
+                                 "type": {
+                                     "type": "fixed",
+                                     "logicalType": "uuid",
+                                     "name": "ReferencedUuid",
+                                     "size": 16
+                                 }
+                             },
+                             {
+                                 "name": "field_1",
+                                 "type": "ReferencedUuid"
+                             }
+                         ]
+                     }
+                     "#)?;
+
+        let target_schema = Schema::Record(
+            RecordSchema::builder()
+            .name(Name::try_from("TestRecord")?.into())
+            .fields(vec![
+                RecordField::builder()
+                .name("field_0")
+                .schema(
+                    Schema::Uuid(UuidSchema::Fixed(FixedSchema::builder().name(Name::try_from("ReferencedUuid")?.into()).size(16).build()))
+                ).build()
+                ,
+                RecordField::builder()
+                .name("field_1")
+                .schema(Schema::Ref { name: Name::new("ReferencedRecord")?.into()})
+                .build()
+            ])
+            .build()
+         );
+
+        assert_eq!(schema,target_schema);
+
+        Ok(())
+    }
 }
