@@ -5475,7 +5475,7 @@ mod tests {
                 ,
                 RecordField::builder()
                 .name("field_1")
-                .schema(Schema::Ref { name: Name::new("ReferencedRecord")?.into()})
+                .schema(Schema::Ref { name: Name::new("ReferencedUuid")?.into()})
                 .build()
             ])
             .build()
