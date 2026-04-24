@@ -15,25 +15,25 @@
 // specific language governing permissions and limitations
 // under the License.
 
-use std::{borrow::Borrow, io::Read};
+use std::{io::Read};
 
 use serde::de::{DeserializeSeed, MapAccess};
 
 use crate::{
-    Error, Schema,
-    schema::RecordSchema,
+    Error,
+    schema::{ResolvedNode, ResolvedRecord},
     serde::deser_schema::{Config, SchemaAwareDeserializer, identifier::IdentifierDeserializer},
 };
 
-pub struct RecordDeserializer<'s, 'r, R: Read, S: Borrow<Schema>> {
+pub struct RecordDeserializer<'s, 'r, R: Read> {
     reader: &'r mut R,
-    schema: &'s RecordSchema,
-    config: Config<'s, S>,
+    schema: ResolvedRecord<'s>,
+    config: Config,
     current_field: usize,
 }
 
-impl<'s, 'r, R: Read, S: Borrow<Schema>> RecordDeserializer<'s, 'r, R, S> {
-    pub fn new(reader: &'r mut R, schema: &'s RecordSchema, config: Config<'s, S>) -> Self {
+impl<'s, 'r, R: Read> RecordDeserializer<'s, 'r, R> {
+    pub fn new(reader: &'r mut R, schema: ResolvedRecord<'s>, config: Config) -> Self {
         Self {
             reader,
             schema,
@@ -43,7 +43,7 @@ impl<'s, 'r, R: Read, S: Borrow<Schema>> RecordDeserializer<'s, 'r, R, S> {
     }
 }
 
-impl<'de, 's, 'r, R: Read, S: Borrow<Schema>> MapAccess<'de> for RecordDeserializer<'s, 'r, R, S> {
+impl<'de, 's, 'r, R: Read> MapAccess<'de> for RecordDeserializer<'s, 'r, R> {
     type Error = Error;
 
     fn next_key_seed<K>(&mut self, seed: K) -> Result<Option<K::Value>, Self::Error>
@@ -65,13 +65,8 @@ impl<'de, 's, 'r, R: Read, S: Borrow<Schema>> MapAccess<'de> for RecordDeseriali
     where
         V: DeserializeSeed<'de>,
     {
-        let schema = &self.schema.fields[self.current_field].schema;
-        let schema = if let Schema::Ref { name } = schema {
-            self.config.get_schema(name)?
-        } else {
-            schema
-        };
-        let value = if let Schema::Record(record) = schema
+        let schema = &self.schema.fields[self.current_field].resolve_field();
+        let value = if let ResolvedNode::Record(record) = schema
             && record.fields.len() == 1
             && record
                 .attributes
@@ -80,15 +75,15 @@ impl<'de, 's, 'r, R: Read, S: Borrow<Schema>> MapAccess<'de> for RecordDeseriali
         {
             seed.deserialize(SchemaAwareDeserializer::new(
                 self.reader,
-                &record.fields[0].schema,
+                record.fields[0].resolve_field(),
                 self.config,
-            )?)?
+            ))?
         } else {
             seed.deserialize(SchemaAwareDeserializer::new(
                 self.reader,
-                schema,
+                schema.clone(),
                 self.config,
-            )?)?
+            ))?
         };
         self.current_field += 1;
         Ok(value)

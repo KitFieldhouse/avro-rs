@@ -15,13 +15,13 @@
 // specific language governing permissions and limitations
 // under the License.
 
-use std::{borrow::Borrow, io::Read};
+use std::{io::Read};
 
 use serde::de::{DeserializeSeed, MapAccess, SeqAccess};
 
 use super::{Config, SchemaAwareDeserializer};
-use crate::schema::{MapSchema, ResolvedArray, ResolvedMap, ResolvedNode};
-use crate::{Error, Schema, schema::ArraySchema, util::zag_i64};
+use crate::schema::{ResolvedArray, ResolvedMap, ResolvedNode};
+use crate::{Error, util::zag_i64};
 
 /// Deserialize sequences from an Avro array.
 pub struct BlockDeserializer<'s, 'r, R: Read> {
@@ -111,7 +111,7 @@ impl<'de, 's, 'r, R: Read> SeqAccess<'de> for BlockDeserializer<'s, 'r, R> {
 }
 
 /// Deserialize as a map
-impl<'de, 's, 'r, R: Read, S: Borrow<Schema>> MapAccess<'de> for BlockDeserializer<'s, 'r, R, S> {
+impl<'de, 's, 'r, R: Read> MapAccess<'de> for BlockDeserializer<'s, 'r, R> {
     type Error = Error;
 
     fn next_key_seed<K>(&mut self, seed: K) -> Result<Option<K::Value>, Self::Error>
@@ -121,9 +121,9 @@ impl<'de, 's, 'r, R: Read, S: Borrow<Schema>> MapAccess<'de> for BlockDeserializ
         if self.remaining.is_some() {
             seed.deserialize(SchemaAwareDeserializer::new(
                 self.reader,
-                &Schema::String,
+                ResolvedNode::String,
                 self.config,
-            )?)
+            ))
             .map(Some)
         } else {
             Ok(None)
@@ -139,9 +139,9 @@ impl<'de, 's, 'r, R: Read, S: Borrow<Schema>> MapAccess<'de> for BlockDeserializ
             .expect("next_key returned None, next_value should not have been called");
         let value = seed.deserialize(SchemaAwareDeserializer::new(
             self.reader,
-            self.schema,
+            self.schema.clone(),
             self.config,
-        )?)?;
+        ))?;
 
         remaining -= 1;
         if remaining == 0 {
@@ -164,14 +164,14 @@ impl<'de, 's, 'r, R: Read, S: Borrow<Schema>> MapAccess<'de> for BlockDeserializ
         if let Some(mut remaining) = self.remaining {
             let key = kseed.deserialize(SchemaAwareDeserializer::new(
                 self.reader,
-                &Schema::String,
+                ResolvedNode::String,
                 self.config,
-            )?)?;
+            ))?;
             let value = vseed.deserialize(SchemaAwareDeserializer::new(
                 self.reader,
-                self.schema,
+                self.schema.clone(),
                 self.config,
-            )?)?;
+            ))?;
 
             remaining -= 1;
             if remaining == 0 {

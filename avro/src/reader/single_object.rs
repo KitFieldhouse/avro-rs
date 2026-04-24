@@ -69,14 +69,13 @@ impl GenericSingleObjectReader {
     pub fn read_deser<T: DeserializeOwned>(&self, reader: &mut impl Read) -> AvroResult<T> {
         self.read_header(reader)?;
         let config = Config {
-            names: self.write_schema.get_names(),
             human_readable: self.human_readable,
         };
         T::deserialize(SchemaAwareDeserializer::new(
             reader,
-            self.write_schema.get_root_schema(),
+            ResolvedNode::new(&self.write_schema),
             config,
-        )?)
+        ))
     }
 
     fn read_header(&self, reader: &mut impl Read) -> AvroResult<()> {

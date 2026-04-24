@@ -577,7 +577,7 @@ impl<'de, 's, 'r, R: Read> Deserializer<'de>
             // The derived Deserialize implementations use `deserialize_unit` instead
             ResolvedNode::Null if len == 0 => visitor.visit_unit(),
             schema if len == 1 => {
-                visitor.visit_seq(OneTupleDeserializer::new(self.reader, schema, self.config)?)
+                visitor.visit_seq(OneTupleDeserializer::new(self.reader, schema, self.config))
             }
             ResolvedNode::Record(record) if record.fields.len() == len => {
                 visitor.visit_seq(ManyTupleDeserializer::new(self.reader, record, self.config))

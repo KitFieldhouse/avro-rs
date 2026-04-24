@@ -173,12 +173,11 @@ impl<'s> GenericDatumReader<'s> {
         } else {
             T::deserialize(SchemaAwareDeserializer::new(
                 reader,
-                self.writer,
+                ResolvedNode::new(&self.resolved),
                 Config {
-                    names: self.resolved.get_names(),
                     human_readable: self.human_readable,
                 },
-            )?)
+            ))
         }
     }
 }
@@ -215,12 +214,11 @@ impl<T: AvroSchema + DeserializeOwned> SpecificDatumReader<T> {
     pub fn read<R: Read>(&self, reader: &mut R) -> AvroResult<T> {
         T::deserialize(SchemaAwareDeserializer::new(
             reader,
-            self.resolved.get_root_schema(),
+            ResolvedNode::new(&self.resolved),
             Config {
-                names: self.resolved.get_names(),
                 human_readable: self.human_readable,
             },
-        )?)
+        ))
     }
 }
 

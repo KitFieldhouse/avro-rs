@@ -15,45 +15,40 @@
 // specific language governing permissions and limitations
 // under the License.
 
-use std::{borrow::Borrow, io::Read};
+use std::{io::Read};
 
 use serde::de::{DeserializeSeed, SeqAccess};
 
 use crate::{
-    Error, Schema,
-    schema::RecordSchema,
+    Error,
+    schema::{ResolvedNode, ResolvedRecord},
     serde::deser_schema::{Config, SchemaAwareDeserializer},
 };
 
-pub struct OneTupleDeserializer<'s, 'r, R: Read, S: Borrow<Schema>> {
+pub struct OneTupleDeserializer<'s, 'r, R: Read> {
     reader: &'r mut R,
-    schema: &'s Schema,
-    config: Config<'s, S>,
+    schema: ResolvedNode<'s>,
+    config: Config,
     field_read: bool,
 }
 
-impl<'s, 'r, R: Read, S: Borrow<Schema>> OneTupleDeserializer<'s, 'r, R, S> {
+impl<'s, 'r, R: Read> OneTupleDeserializer<'s, 'r, R> {
     pub fn new(
         reader: &'r mut R,
-        schema: &'s Schema,
-        config: Config<'s, S>,
-    ) -> Result<Self, Error> {
-        let schema = if let Schema::Ref { name } = schema {
-            config.get_schema(name)?
-        } else {
-            schema
-        };
-        Ok(Self {
+        schema: ResolvedNode<'s>,
+        config: Config,
+    ) -> Self{
+        Self {
             reader,
             schema,
             config,
             field_read: false,
-        })
+        }
     }
 }
 
-impl<'de, 's, 'r, R: Read, S: Borrow<Schema>> SeqAccess<'de>
-    for OneTupleDeserializer<'s, 'r, R, S>
+impl<'de, 's, 'r, R: Read> SeqAccess<'de>
+    for OneTupleDeserializer<'s, 'r, R>
 {
     type Error = Error;
 
@@ -66,9 +61,9 @@ impl<'de, 's, 'r, R: Read, S: Borrow<Schema>> SeqAccess<'de>
         } else {
             let val = seed.deserialize(SchemaAwareDeserializer::new(
                 self.reader,
-                self.schema,
+                self.schema.clone(),
                 self.config,
-            )?)?;
+            ))?;
             self.field_read = true;
             Ok(Some(val))
         }
@@ -79,15 +74,15 @@ impl<'de, 's, 'r, R: Read, S: Borrow<Schema>> SeqAccess<'de>
     }
 }
 
-pub struct ManyTupleDeserializer<'s, 'r, R: Read, S: Borrow<Schema>> {
+pub struct ManyTupleDeserializer<'s, 'r, R: Read> {
     reader: &'r mut R,
-    schema: &'s RecordSchema,
-    config: Config<'s, S>,
+    schema: ResolvedRecord<'s>,
+    config: Config,
     current_field: usize,
 }
 
-impl<'s, 'r, R: Read, S: Borrow<Schema>> ManyTupleDeserializer<'s, 'r, R, S> {
-    pub fn new(reader: &'r mut R, schema: &'s RecordSchema, config: Config<'s, S>) -> Self {
+impl<'s, 'r, R: Read> ManyTupleDeserializer<'s, 'r, R> {
+    pub fn new(reader: &'r mut R, schema: ResolvedRecord<'s>, config: Config) -> Self {
         Self {
             reader,
             schema,
@@ -97,8 +92,8 @@ impl<'s, 'r, R: Read, S: Borrow<Schema>> ManyTupleDeserializer<'s, 'r, R, S> {
     }
 }
 
-impl<'de, 's, 'r, R: Read, S: Borrow<Schema>> SeqAccess<'de>
-    for ManyTupleDeserializer<'s, 'r, R, S>
+impl<'de, 's, 'r, R: Read> SeqAccess<'de>
+    for ManyTupleDeserializer<'s, 'r, R>
 {
     type Error = Error;
 
@@ -107,12 +102,12 @@ impl<'de, 's, 'r, R: Read, S: Borrow<Schema>> SeqAccess<'de>
         T: DeserializeSeed<'de>,
     {
         if self.current_field < self.schema.fields.len() {
-            let schema = &self.schema.fields[self.current_field].schema;
+            let schema = self.schema.fields[self.current_field].resolve_field();
             let val = seed.deserialize(SchemaAwareDeserializer::new(
                 self.reader,
                 schema,
                 self.config,
-            )?)?;
+            ))?;
             self.current_field += 1;
             Ok(Some(val))
         } else {

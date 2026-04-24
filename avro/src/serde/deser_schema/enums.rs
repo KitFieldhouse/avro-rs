@@ -15,7 +15,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-use std::{borrow::Borrow, io::Read};
+use std::{io::Read};
 
 use serde::{
     Deserializer,
@@ -24,9 +24,9 @@ use serde::{
 
 use super::{Config, DESERIALIZE_ANY, SchemaAwareDeserializer, identifier::IdentifierDeserializer};
 use crate::{
-    Error, Schema,
+    Error,
     error::Details,
-    schema::{EnumSchema, UnionSchema},
+    schema::{EnumSchema, ResolvedNode, ResolvedUnion},
     util::zag_i32,
 };
 
@@ -98,27 +98,27 @@ impl<'de, 's, 'r, R: Read> VariantAccess<'de> for PlainEnumDeserializer<'s, 'r, 
     }
 }
 
-pub struct UnionEnumDeserializer<'s, 'r, R: Read, S: Borrow<Schema>> {
+pub struct UnionEnumDeserializer<'s, 'r, R: Read> {
     reader: &'r mut R,
-    variants: &'s [Schema],
-    config: Config<'s, S>,
+    variants: Vec<ResolvedNode<'s>>, // KTODO: this could be made more performatn
+    config: Config,
 }
 
-impl<'s, 'r, R: Read, S: Borrow<Schema>> UnionEnumDeserializer<'s, 'r, R, S> {
-    pub fn new(reader: &'r mut R, schema: &'s UnionSchema, config: Config<'s, S>) -> Self {
+impl<'s, 'r, R: Read> UnionEnumDeserializer<'s, 'r, R> {
+    pub fn new(reader: &'r mut R, schema: ResolvedUnion<'s>, config: Config) -> Self {
         Self {
             reader,
-            variants: schema.variants(),
+            variants: schema.resolve_schemas(),
             config,
         }
     }
 }
 
-impl<'de, 's, 'r, R: Read, S: Borrow<Schema>> EnumAccess<'de>
-    for UnionEnumDeserializer<'s, 'r, R, S>
+impl<'de, 's, 'r, R: Read> EnumAccess<'de>
+    for UnionEnumDeserializer<'s, 'r, R>
 {
     type Error = Error;
-    type Variant = UnionVariantAccess<'s, 'r, R, S>;
+    type Variant = UnionVariantAccess<'s, 'r, R>;
 
     fn variant_seed<V>(self, seed: V) -> Result<(V::Value, Self::Variant), Self::Error>
     where
@@ -133,53 +133,48 @@ impl<'de, 's, 'r, R: Read, S: Borrow<Schema>> EnumAccess<'de>
 
         Ok((
             seed.deserialize(IdentifierDeserializer::index(index as u32))?,
-            UnionVariantAccess::new(schema, self.reader, self.config)?,
+            UnionVariantAccess::new(schema.clone(), self.reader, self.config),
         ))
     }
 }
 
-pub struct UnionVariantAccess<'s, 'r, R: Read, S: Borrow<Schema>> {
-    schema: &'s Schema,
+pub struct UnionVariantAccess<'s, 'r, R: Read> {
+    schema: ResolvedNode<'s>,
     reader: &'r mut R,
-    config: Config<'s, S>,
+    config: Config,
 }
 
-impl<'s, 'r, R: Read, S: Borrow<Schema>> UnionVariantAccess<'s, 'r, R, S> {
+impl<'s, 'r, R: Read> UnionVariantAccess<'s, 'r, R> {
     pub fn new(
-        schema: &'s Schema,
+        schema: ResolvedNode<'s>,
         reader: &'r mut R,
-        config: Config<'s, S>,
-    ) -> Result<Self, Error> {
-        let schema = if let Schema::Ref { name } = schema {
-            config.get_schema(name)?
-        } else {
-            schema
-        };
-        Ok(Self {
+        config: Config,
+    ) -> Self {
+        Self {
             schema,
             reader,
             config,
-        })
+        }
     }
 
     fn error(&self, ty: &'static str, error: impl Into<String>) -> Error {
         Error::new(Details::DeserializeSchemaAware {
             value_type: ty,
             value: error.into(),
-            schema: self.schema.clone(),
+            schema: self.schema.unravel(),
         })
     }
 }
 
-impl<'de, 's, 'r, R: Read, S: Borrow<Schema>> VariantAccess<'de>
-    for UnionVariantAccess<'s, 'r, R, S>
+impl<'de, 's, 'r, R: Read> VariantAccess<'de>
+    for UnionVariantAccess<'s, 'r, R>
 {
     type Error = Error;
 
     fn unit_variant(self) -> Result<(), Self::Error> {
         match self.schema {
-            Schema::Null => Ok(()),
-            Schema::Record(record) if record.fields.is_empty() => Ok(()),
+            ResolvedNode::Null => Ok(()),
+            ResolvedNode::Record(record) if record.fields.is_empty() => Ok(()),
             _ => Err(self.error(
                 "unit variant",
                 "Expected Schema::Null | Schema::Record(fields.len() == 0)",
@@ -192,7 +187,7 @@ impl<'de, 's, 'r, R: Read, S: Borrow<Schema>> VariantAccess<'de>
         T: DeserializeSeed<'de>,
     {
         match self.schema {
-            Schema::Record(record)
+            ResolvedNode::Record(record)
                 if record.fields.len() == 1
                     && record
                         .attributes
@@ -201,15 +196,15 @@ impl<'de, 's, 'r, R: Read, S: Borrow<Schema>> VariantAccess<'de>
             {
                 seed.deserialize(SchemaAwareDeserializer::new(
                     self.reader,
-                    &record.fields[0].schema,
+                    record.fields[0].resolve_field(),
                     self.config,
-                )?)
+                ))
             }
             _ => seed.deserialize(SchemaAwareDeserializer::new(
                 self.reader,
                 self.schema,
                 self.config,
-            )?),
+            )),
         }
     }
 
@@ -217,7 +212,7 @@ impl<'de, 's, 'r, R: Read, S: Borrow<Schema>> VariantAccess<'de>
     where
         V: Visitor<'de>,
     {
-        SchemaAwareDeserializer::new(self.reader, self.schema, self.config)?
+        SchemaAwareDeserializer::new(self.reader, self.schema, self.config)
             .deserialize_tuple(len, visitor)
     }
 
@@ -229,7 +224,7 @@ impl<'de, 's, 'r, R: Read, S: Borrow<Schema>> VariantAccess<'de>
     where
         V: Visitor<'de>,
     {
-        SchemaAwareDeserializer::new(self.reader, self.schema, self.config)?.deserialize_struct(
+        SchemaAwareDeserializer::new(self.reader, self.schema, self.config).deserialize_struct(
             DESERIALIZE_ANY,
             fields,
             visitor,
