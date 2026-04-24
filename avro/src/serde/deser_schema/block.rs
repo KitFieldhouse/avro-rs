@@ -20,29 +20,25 @@ use std::{borrow::Borrow, io::Read};
 use serde::de::{DeserializeSeed, MapAccess, SeqAccess};
 
 use super::{Config, SchemaAwareDeserializer};
-use crate::schema::MapSchema;
+use crate::schema::{MapSchema, ResolvedArray, ResolvedMap, ResolvedNode};
 use crate::{Error, Schema, schema::ArraySchema, util::zag_i64};
 
 /// Deserialize sequences from an Avro array.
-pub struct BlockDeserializer<'s, 'r, R: Read, S: Borrow<Schema>> {
+pub struct BlockDeserializer<'s, 'r, R: Read> {
     reader: &'r mut R,
-    schema: &'s Schema,
-    config: Config<'s, S>,
+    schema: ResolvedNode<'s>,
+    config: Config,
     /// Track where we are in reading the array
     remaining: Option<u64>,
 }
 
-impl<'s, 'r, R: Read, S: Borrow<Schema>> BlockDeserializer<'s, 'r, R, S> {
+impl<'s, 'r, R: Read> BlockDeserializer<'s, 'r, R> {
     pub fn array(
         reader: &'r mut R,
-        schema: &'s ArraySchema,
-        config: Config<'s, S>,
+        schema: ResolvedArray<'s>,
+        config: Config,
     ) -> Result<Self, Error> {
-        let schema = if let Schema::Ref { name } = schema.items.as_ref() {
-            config.get_schema(name)?
-        } else {
-            &schema.items
-        };
+        let schema = schema.resolve_items();
         let remaining = Self::read_block_header(reader)?;
         Ok(Self {
             reader,
@@ -54,14 +50,10 @@ impl<'s, 'r, R: Read, S: Borrow<Schema>> BlockDeserializer<'s, 'r, R, S> {
 
     pub fn map(
         reader: &'r mut R,
-        schema: &'s MapSchema,
-        config: Config<'s, S>,
+        schema: ResolvedMap<'s>,
+        config: Config,
     ) -> Result<Self, Error> {
-        let schema = if let Schema::Ref { name } = schema.types.as_ref() {
-            config.get_schema(name)?
-        } else {
-            &schema.types
-        };
+        let schema = schema.resolve_types();
         let remaining = Self::read_block_header(reader)?;
         Ok(Self {
             reader,
@@ -87,7 +79,7 @@ impl<'s, 'r, R: Read, S: Borrow<Schema>> BlockDeserializer<'s, 'r, R, S> {
 }
 
 /// Deserialize as an array
-impl<'de, 's, 'r, R: Read, S: Borrow<Schema>> SeqAccess<'de> for BlockDeserializer<'s, 'r, R, S> {
+impl<'de, 's, 'r, R: Read> SeqAccess<'de> for BlockDeserializer<'s, 'r, R> {
     type Error = Error;
 
     fn next_element_seed<T>(&mut self, seed: T) -> Result<Option<T::Value>, Self::Error>
@@ -97,9 +89,9 @@ impl<'de, 's, 'r, R: Read, S: Borrow<Schema>> SeqAccess<'de> for BlockDeserializ
         if let Some(mut remaining) = self.remaining {
             let value = seed.deserialize(SchemaAwareDeserializer::new(
                 self.reader,
-                self.schema,
+                self.schema.clone(),
                 self.config,
-            )?)?;
+            ))?;
             remaining -= 1;
             if remaining == 0 {
                 self.remaining = Self::read_block_header(self.reader)?;

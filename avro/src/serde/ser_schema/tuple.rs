@@ -244,7 +244,7 @@ impl<'s, 'w, W: Write> SerializeTuple for OneTupleSerializer<'s, 'w, W> {
         match &self.schema {
             ResolvedNode::Union(union) => {
                 self.bytes_written +=
-                    value.serialize(UnionSerializer::new(self.writer, union.clone(), self.config))?;
+                    value.serialize(UnionSerializer::new(self.writer, *union, self.config))?;
             }
             schema => {
                 self.bytes_written += value.serialize(SchemaAwareSerializer::new(
@@ -289,7 +289,7 @@ impl<'s, 'w, W: Write> SerializeTuple for OneUnionTupleSerializer<'s, 'w, W> {
         T: ?Sized + Serialize,
     {
         self.bytes_written +=
-            value.serialize(UnionSerializer::new(self.writer, self.union.clone(), self.config))?;
+            value.serialize(UnionSerializer::new(self.writer, self.union, self.config))?;
         Ok(())
     }
 

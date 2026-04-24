@@ -15,15 +15,15 @@
 // specific language governing permissions and limitations
 // under the License.
 
-use std::{borrow::Borrow, collections::HashMap, io::Read};
+use std::{io::Read};
 
 use serde::de::{Deserializer, Visitor};
 
 use crate::{
-    Error, Schema,
+    Error,
     decode::decode_len,
     error::Details,
-    schema::{DecimalSchema, InnerDecimalSchema, Name, UnionSchema, UuidSchema},
+    schema::{DecimalSchema, InnerDecimalSchema,ResolvedNode, ResolvedUnion, UuidSchema},
     util::{zag_i32, zag_i64},
 };
 
@@ -41,69 +41,32 @@ use tuple::{ManyTupleDeserializer, OneTupleDeserializer};
 use crate::serde::deser_schema::enums::UnionEnumDeserializer;
 
 /// Configure the deserializer.
-#[derive(Debug)]
-pub struct Config<'s, S: Borrow<Schema>> {
-    /// Any references in the schema will be resolved using this map.
-    ///
-    /// This map is not allowed to contain any [`Schema::Ref`], the deserializer is allowed to panic
-    /// in that case.
-    pub names: &'s HashMap<Name, S>,
+#[derive(Debug, Clone, Copy)]
+pub struct Config {
     /// Was the data serialized with `human_readable`.
     pub human_readable: bool,
 }
 
-impl<'s, S: Borrow<Schema>> Config<'s, S> {
-    /// Get the schema for this name.
-    fn get_schema(&self, name: &Name) -> Result<&'s Schema, Error> {
-        self.names
-            .get(name)
-            .map(Borrow::borrow)
-            .ok_or_else(|| Details::SchemaResolutionError(name.clone()).into())
-    }
-}
-
-// This needs to be implemented manually as the derive puts a bound on `S`
-// which is unnecessary as a reference is always Copy.
-impl<'s, S: Borrow<Schema>> Copy for Config<'s, S> {}
-impl<'s, S: Borrow<Schema>> Clone for Config<'s, S> {
-    fn clone(&self) -> Self {
-        *self
-    }
-}
-
 /// A deserializer that deserializes directly from raw Avro datum.
-pub struct SchemaAwareDeserializer<'s, 'r, R: Read, S: Borrow<Schema>> {
+pub struct SchemaAwareDeserializer<'s, 'r, R: Read> {
     reader: &'r mut R,
     /// The schema of the data being deserialized.
-    ///
-    /// This schema is guaranteed to not be a [`Schema::Ref`].
-    schema: &'s Schema,
-    config: Config<'s, S>,
+    schema: ResolvedNode<'s>,
+    config: Config,
 }
 
-impl<'s, 'r, R: Read, S: Borrow<Schema>> SchemaAwareDeserializer<'s, 'r, R, S> {
+impl<'s, 'r, R: Read> SchemaAwareDeserializer<'s, 'r, R> {
     /// Create a new deserializer for this schema.
-    ///
-    /// This will resolve a [`Schema::Ref`] to its actual schema.
     pub fn new(
         reader: &'r mut R,
-        schema: &'s Schema,
-        config: Config<'s, S>,
-    ) -> Result<Self, Error> {
-        if let Schema::Ref { name } = schema {
-            let schema = config.get_schema(name)?;
-            Ok(Self {
+        schema: ResolvedNode<'s>,
+        config: Config,
+    ) -> Self {
+            Self {
                 reader,
                 schema,
                 config,
-            })
-        } else {
-            Ok(Self {
-                reader,
-                schema,
-                config,
-            })
-        }
+            }
     }
 
     /// Create an error for the current type being deserialized with the given message.
@@ -113,58 +76,54 @@ impl<'s, 'r, R: Read, S: Borrow<Schema>> SchemaAwareDeserializer<'s, 'r, R, S> {
         Error::new(Details::DeserializeSchemaAware {
             value_type: ty,
             value: error.into(),
-            schema: self.schema.clone(),
+            schema: self.schema.unravel(),
         })
     }
 
     /// Create a new deserializer with the existing reader and config.
     ///
     /// This will resolve the schema if it is a reference.
-    fn with_different_schema(mut self, schema: &'s Schema) -> Result<Self, Error> {
-        self.schema = if let Schema::Ref { name } = schema {
-            self.config.get_schema(name)?
-        } else {
-            schema
-        };
-        Ok(self)
+    fn with_different_schema(mut self, schema: ResolvedNode<'s>) -> Self {
+        self.schema = schema;
+        self
     }
 
     /// Read the union and create a new deserializer with the existing reader and config.
     ///
     /// This will resolve the read schema if it is a reference.
-    fn with_union(self, schema: &'s UnionSchema) -> Result<Self, Error> {
+    fn with_union(self, schema: ResolvedUnion<'s>) -> Result<Self, Error> {
         let index = zag_i32(self.reader)?;
         let index = usize::try_from(index).map_err(|e| Details::ConvertI32ToUsize(e, index))?;
         let variant = schema.get_variant(index)?;
-        self.with_different_schema(variant)
+        Ok(self.with_different_schema(variant))
     }
 
     /// Read an integer from the reader.
     ///
-    /// This will check that the current schema is [`Schema::Int`] or a logical type based on that.
-    /// It does not read [`Schema::Union`]s.
+    /// This will check that the current schema is [`ResolvedNode::Int`] or a logical type based on that.
+    /// It does not read [`ResolvedNode::Union`]s.
     fn checked_read_int(&mut self, original_ty: &'static str) -> Result<i32, Error> {
         match self.schema {
-            Schema::Int | Schema::Date | Schema::TimeMillis => zag_i32(self.reader),
+            ResolvedNode::Int | ResolvedNode::Date | ResolvedNode::TimeMillis => zag_i32(self.reader),
             _ => Err(self.error(
                 original_ty,
-                "Expected Schema::Int | Schema::Date | Schema::TimeMillis",
+                "Expected ResolvedNode::Int | ResolvedNode::Date | ResolvedNode::TimeMillis",
             )),
         }
     }
 
     /// Read a long from the reader.
     ///
-    /// This will check that the current schema is [`Schema::Long`] or a logical type based on that.
-    /// It does not read [`Schema::Union`]s.
+    /// This will check that the current schema is [`ResolvedNode::Long`] or a logical type based on that.
+    /// It does not read [`ResolvedNode::Union`]s.
     fn checked_read_long(&mut self, original_ty: &'static str) -> Result<i64, Error> {
         match self.schema {
-            Schema::Long | Schema::TimeMicros | Schema::TimestampMillis | Schema::TimestampMicros
-            | Schema::TimestampNanos | Schema::LocalTimestampMillis | Schema::LocalTimestampMicros
-            | Schema::LocalTimestampNanos => zag_i64(self.reader),
+            ResolvedNode::Long | ResolvedNode::TimeMicros | ResolvedNode::TimestampMillis | ResolvedNode::TimestampMicros
+            | ResolvedNode::TimestampNanos | ResolvedNode::LocalTimestampMillis | ResolvedNode::LocalTimestampMicros
+            | ResolvedNode::LocalTimestampNanos => zag_i64(self.reader),
             _ => Err(self.error(
                 original_ty,
-                "Expected Schema::Long | Schema::TimeMicros | Schema::{,Local}Timestamp{Millis,Micros,Nanos}",
+                "Expected ResolvedNode::Long | ResolvedNode::TimeMicros | ResolvedNode::{,Local}Timestamp{Millis,Micros,Nanos}",
             )),
 
         }
@@ -220,8 +179,8 @@ static DESERIALIZE_ANY: &str = "This value is compared by pointer value";
 /// A static array so that `deserialize_any` can call `deserialize_*` functions.
 static DESERIALIZE_ANY_FIELDS: &[&str] = &[];
 
-impl<'de, 's, 'r, R: Read, S: Borrow<Schema>> Deserializer<'de>
-    for SchemaAwareDeserializer<'s, 'r, R, S>
+impl<'de, 's, 'r, R: Read> Deserializer<'de>
+    for SchemaAwareDeserializer<'s, 'r, R>
 {
     type Error = Error;
 
@@ -230,44 +189,44 @@ impl<'de, 's, 'r, R: Read, S: Borrow<Schema>> Deserializer<'de>
         V: Visitor<'de>,
     {
         match self.schema {
-            Schema::Null => self.deserialize_unit(visitor),
-            Schema::Boolean => self.deserialize_bool(visitor),
-            Schema::Int | Schema::Date | Schema::TimeMillis => self.deserialize_i32(visitor),
-            Schema::Long
-            | Schema::TimeMicros
-            | Schema::TimestampMillis
-            | Schema::TimestampMicros
-            | Schema::TimestampNanos
-            | Schema::LocalTimestampMillis
-            | Schema::LocalTimestampMicros
-            | Schema::LocalTimestampNanos => self.deserialize_i64(visitor),
-            Schema::Float => self.deserialize_f32(visitor),
-            Schema::Double => self.deserialize_f64(visitor),
-            Schema::Bytes
-            | Schema::Fixed(_)
-            | Schema::Decimal(_)
-            | Schema::BigDecimal
-            | Schema::Uuid(UuidSchema::Fixed(_) | UuidSchema::Bytes)
-            | Schema::Duration(_) => self.deserialize_byte_buf(visitor),
-            Schema::String | Schema::Uuid(UuidSchema::String) => self.deserialize_string(visitor),
-            Schema::Array(_) => self.deserialize_seq(visitor),
-            Schema::Map(_) => self.deserialize_map(visitor),
-            Schema::Union(union) => self.with_union(union)?.deserialize_any(visitor),
-            Schema::Record(schema) => {
+            ResolvedNode::Null => self.deserialize_unit(visitor),
+            ResolvedNode::Boolean => self.deserialize_bool(visitor),
+            ResolvedNode::Int | ResolvedNode::Date | ResolvedNode::TimeMillis => self.deserialize_i32(visitor),
+            ResolvedNode::Long
+            | ResolvedNode::TimeMicros
+            | ResolvedNode::TimestampMillis
+            | ResolvedNode::TimestampMicros
+            | ResolvedNode::TimestampNanos
+            | ResolvedNode::LocalTimestampMillis
+            | ResolvedNode::LocalTimestampMicros
+            | ResolvedNode::LocalTimestampNanos => self.deserialize_i64(visitor),
+            ResolvedNode::Float => self.deserialize_f32(visitor),
+            ResolvedNode::Double => self.deserialize_f64(visitor),
+            ResolvedNode::Bytes
+            | ResolvedNode::Fixed(_)
+            | ResolvedNode::Decimal(_)
+            | ResolvedNode::BigDecimal
+            | ResolvedNode::Uuid(UuidSchema::Fixed(_) | UuidSchema::Bytes)
+            | ResolvedNode::Duration(_) => self.deserialize_byte_buf(visitor),
+            ResolvedNode::String | ResolvedNode::Uuid(UuidSchema::String) => self.deserialize_string(visitor),
+            ResolvedNode::Array(_) => self.deserialize_seq(visitor),
+            ResolvedNode::Map(_) => self.deserialize_map(visitor),
+            ResolvedNode::Union(union) => self.with_union(union)?.deserialize_any(visitor),
+            ResolvedNode::Record(ref schema) => {
                 if schema.attributes.get("org.apache.avro.rust.tuple")
                     == Some(&serde_json::Value::Bool(true))
                 {
                     // This attribute is needed because we can't tell the difference between a tuple
                     // and struct, but a tuple needs to be deserialized as a sequence instead of a map.
-                    self.deserialize_tuple(schema.fields.len(), visitor)
+                    let len = schema.fields.len();
+                    self.deserialize_tuple(len, visitor)
                 } else {
                     self.deserialize_struct(DESERIALIZE_ANY, DESERIALIZE_ANY_FIELDS, visitor)
                 }
             }
-            Schema::Enum(_) => {
+            ResolvedNode::Enum(_) => {
                 self.deserialize_enum(DESERIALIZE_ANY, DESERIALIZE_ANY_FIELDS, visitor)
             }
-            Schema::Ref { .. } => unreachable!("References are resolved on deserializer creation"),
         }
     }
 
@@ -276,7 +235,7 @@ impl<'de, 's, 'r, R: Read, S: Borrow<Schema>> Deserializer<'de>
         V: Visitor<'de>,
     {
         match self.schema {
-            Schema::Boolean => {
+            ResolvedNode::Boolean => {
                 let mut buf = [0xFF];
                 self.reader
                     .read_exact(&mut buf)
@@ -287,8 +246,8 @@ impl<'de, 's, 'r, R: Read, S: Borrow<Schema>> Deserializer<'de>
                     _ => Err(self.error("bool", format!("{} is not a valid boolean", buf[0]))),
                 }
             }
-            Schema::Union(union) => self.with_union(union)?.deserialize_bool(visitor),
-            _ => Err(self.error("bool", "Expected Schema::Boolean")),
+            ResolvedNode::Union(union) => self.with_union(union)?.deserialize_bool(visitor),
+            _ => Err(self.error("bool", "Expected ResolvedNode::Boolean")),
         }
     }
 
@@ -296,7 +255,7 @@ impl<'de, 's, 'r, R: Read, S: Borrow<Schema>> Deserializer<'de>
     where
         V: Visitor<'de>,
     {
-        if let Schema::Union(union) = self.schema {
+        if let ResolvedNode::Union(union) = self.schema {
             self.with_union(union)?.deserialize_i8(visitor)
         } else {
             let int = self.checked_read_int("i8")?;
@@ -310,7 +269,7 @@ impl<'de, 's, 'r, R: Read, S: Borrow<Schema>> Deserializer<'de>
     where
         V: Visitor<'de>,
     {
-        if let Schema::Union(union) = self.schema {
+        if let ResolvedNode::Union(union) = self.schema {
             self.with_union(union)?.deserialize_i16(visitor)
         } else {
             let int = self.checked_read_int("i16")?;
@@ -325,7 +284,7 @@ impl<'de, 's, 'r, R: Read, S: Borrow<Schema>> Deserializer<'de>
     where
         V: Visitor<'de>,
     {
-        if let Schema::Union(union) = self.schema {
+        if let ResolvedNode::Union(union) = self.schema {
             self.with_union(union)?.deserialize_i32(visitor)
         } else {
             visitor.visit_i32(self.checked_read_int("i32")?)
@@ -336,7 +295,7 @@ impl<'de, 's, 'r, R: Read, S: Borrow<Schema>> Deserializer<'de>
     where
         V: Visitor<'de>,
     {
-        if let Schema::Union(union) = self.schema {
+        if let ResolvedNode::Union(union) = self.schema {
             self.with_union(union)?.deserialize_i64(visitor)
         } else {
             visitor.visit_i64(self.checked_read_long("i64")?)
@@ -348,11 +307,11 @@ impl<'de, 's, 'r, R: Read, S: Borrow<Schema>> Deserializer<'de>
         V: Visitor<'de>,
     {
         match self.schema {
-            Schema::Fixed(fixed) if fixed.size == 16 && fixed.name.name() == "i128" => {
+            ResolvedNode::Fixed(fixed) if fixed.size == 16 && fixed.name.name() == "i128" => {
                 visitor.visit_i128(i128::from_le_bytes(self.read_array()?))
             }
-            Schema::Union(union) => self.with_union(union)?.deserialize_i128(visitor),
-            _ => Err(self.error("i128", r#"Expected Schema::Fixed(name: "i128", size: 16)"#)),
+            ResolvedNode::Union(union) => self.with_union(union)?.deserialize_i128(visitor),
+            _ => Err(self.error("i128", r#"Expected ResolvedNode::Fixed(name: "i128", size: 16)"#)),
         }
     }
 
@@ -360,7 +319,7 @@ impl<'de, 's, 'r, R: Read, S: Borrow<Schema>> Deserializer<'de>
     where
         V: Visitor<'de>,
     {
-        if let Schema::Union(union) = self.schema {
+        if let ResolvedNode::Union(union) = self.schema {
             self.with_union(union)?.deserialize_u8(visitor)
         } else {
             let int = self.checked_read_int("u8")?;
@@ -374,7 +333,7 @@ impl<'de, 's, 'r, R: Read, S: Borrow<Schema>> Deserializer<'de>
     where
         V: Visitor<'de>,
     {
-        if let Schema::Union(union) = self.schema {
+        if let ResolvedNode::Union(union) = self.schema {
             self.with_union(union)?.deserialize_u16(visitor)
         } else {
             let int = self.checked_read_int("u16")?;
@@ -389,7 +348,7 @@ impl<'de, 's, 'r, R: Read, S: Borrow<Schema>> Deserializer<'de>
     where
         V: Visitor<'de>,
     {
-        if let Schema::Union(union) = self.schema {
+        if let ResolvedNode::Union(union) = self.schema {
             self.with_union(union)?.deserialize_u32(visitor)
         } else {
             let long = self.checked_read_long("u32")?;
@@ -405,11 +364,11 @@ impl<'de, 's, 'r, R: Read, S: Borrow<Schema>> Deserializer<'de>
         V: Visitor<'de>,
     {
         match self.schema {
-            Schema::Fixed(fixed) if fixed.size == 8 && fixed.name.name() == "u64" => {
+            ResolvedNode::Fixed(fixed) if fixed.size == 8 && fixed.name.name() == "u64" => {
                 visitor.visit_u64(u64::from_le_bytes(self.read_array()?))
             }
-            Schema::Union(union) => self.with_union(union)?.deserialize_u64(visitor),
-            _ => Err(self.error("u64", r#"Expected Schema::Fixed(name: "u64", size: 8)"#)),
+            ResolvedNode::Union(union) => self.with_union(union)?.deserialize_u64(visitor),
+            _ => Err(self.error("u64", r#"Expected ResolvedNode::Fixed(name: "u64", size: 8)"#)),
         }
     }
 
@@ -418,11 +377,11 @@ impl<'de, 's, 'r, R: Read, S: Borrow<Schema>> Deserializer<'de>
         V: Visitor<'de>,
     {
         match self.schema {
-            Schema::Fixed(fixed) if fixed.size == 16 && fixed.name.name() == "u128" => {
+            ResolvedNode::Fixed(fixed) if fixed.size == 16 && fixed.name.name() == "u128" => {
                 visitor.visit_u128(u128::from_le_bytes(self.read_array()?))
             }
-            Schema::Union(union) => self.with_union(union)?.deserialize_u128(visitor),
-            _ => Err(self.error("u128", r#"Expected Schema::Fixed(name: "u128", size: 16)"#)),
+            ResolvedNode::Union(union) => self.with_union(union)?.deserialize_u128(visitor),
+            _ => Err(self.error("u128", r#"Expected ResolvedNode::Fixed(name: "u128", size: 16)"#)),
         }
     }
 
@@ -431,9 +390,9 @@ impl<'de, 's, 'r, R: Read, S: Borrow<Schema>> Deserializer<'de>
         V: Visitor<'de>,
     {
         match self.schema {
-            Schema::Float => visitor.visit_f32(f32::from_le_bytes(self.read_array()?)),
-            Schema::Union(union) => self.with_union(union)?.deserialize_f32(visitor),
-            _ => Err(self.error("f32", "Expected Schema::Float")),
+            ResolvedNode::Float => visitor.visit_f32(f32::from_le_bytes(self.read_array()?)),
+            ResolvedNode::Union(union) => self.with_union(union)?.deserialize_f32(visitor),
+            _ => Err(self.error("f32", "Expected ResolvedNode::Float")),
         }
     }
 
@@ -442,9 +401,9 @@ impl<'de, 's, 'r, R: Read, S: Borrow<Schema>> Deserializer<'de>
         V: Visitor<'de>,
     {
         match self.schema {
-            Schema::Double => visitor.visit_f64(f64::from_le_bytes(self.read_array()?)),
-            Schema::Union(union) => self.with_union(union)?.deserialize_f64(visitor),
-            _ => Err(self.error("f64", "Expected Schema::Double")),
+            ResolvedNode::Double => visitor.visit_f64(f64::from_le_bytes(self.read_array()?)),
+            ResolvedNode::Union(union) => self.with_union(union)?.deserialize_f64(visitor),
+            _ => Err(self.error("f64", "Expected ResolvedNode::Double")),
         }
     }
 
@@ -453,9 +412,9 @@ impl<'de, 's, 'r, R: Read, S: Borrow<Schema>> Deserializer<'de>
         V: Visitor<'de>,
     {
         match self.schema {
-            // A char cannot be deserialized using Schema::Uuid(UuidSchema::String) as that is at least
+            // A char cannot be deserialized using ResolvedNode::Uuid(UuidSchema::String) as that is at least
             // 32 characters.
-            Schema::String => {
+            ResolvedNode::String => {
                 let string = self.read_string()?;
                 let mut chars = string.chars();
                 let char = chars
@@ -471,8 +430,8 @@ impl<'de, 's, 'r, R: Read, S: Borrow<Schema>> Deserializer<'de>
                     visitor.visit_char(char)
                 }
             }
-            Schema::Union(union) => self.with_union(union)?.deserialize_char(visitor),
-            _ => Err(self.error("char", "Expected Schema::String")),
+            ResolvedNode::Union(union) => self.with_union(union)?.deserialize_char(visitor),
+            _ => Err(self.error("char", "Expected ResolvedNode::String")),
         }
     }
 
@@ -488,11 +447,11 @@ impl<'de, 's, 'r, R: Read, S: Borrow<Schema>> Deserializer<'de>
         V: Visitor<'de>,
     {
         match self.schema {
-            Schema::String | Schema::Uuid(UuidSchema::String) => {
+            ResolvedNode::String | ResolvedNode::Uuid(UuidSchema::String) => {
                 visitor.visit_string(self.read_string()?)
             }
-            Schema::Union(union) => self.with_union(union)?.deserialize_string(visitor),
-            _ => Err(self.error("string", "Expected Schema::String | Schema::Uuid(String)")),
+            ResolvedNode::Union(union) => self.with_union(union)?.deserialize_string(visitor),
+            _ => Err(self.error("string", "Expected ResolvedNode::String | ResolvedNode::Uuid(String)")),
         }
     }
 
@@ -508,14 +467,14 @@ impl<'de, 's, 'r, R: Read, S: Borrow<Schema>> Deserializer<'de>
         V: Visitor<'de>,
     {
         match self.schema {
-            Schema::Bytes | Schema::BigDecimal | Schema::Decimal(DecimalSchema { inner: InnerDecimalSchema::Bytes, ..}) | Schema::Uuid(UuidSchema::Bytes) => {
+            ResolvedNode::Bytes | ResolvedNode::BigDecimal | ResolvedNode::Decimal(DecimalSchema { inner: InnerDecimalSchema::Bytes, ..}) | ResolvedNode::Uuid(UuidSchema::Bytes) => {
                 visitor.visit_byte_buf(self.read_bytes_with_len()?)
             }
-            Schema::Fixed(fixed) | Schema::Decimal(DecimalSchema { inner: InnerDecimalSchema::Fixed(fixed), ..}) | Schema::Uuid(UuidSchema::Fixed(fixed)) | Schema::Duration(fixed) => {
+            ResolvedNode::Fixed(fixed) | ResolvedNode::Decimal(DecimalSchema { inner: InnerDecimalSchema::Fixed(fixed), ..}) | ResolvedNode::Uuid(UuidSchema::Fixed(fixed)) | ResolvedNode::Duration(fixed) => {
                 visitor.visit_byte_buf(self.read_bytes(fixed.size)?)
             }
-            Schema::Union(union) => self.with_union(union)?.deserialize_byte_buf(visitor),
-            _ => Err(self.error("bytes", "Expected Schema::Bytes | Schema::Fixed | Schema::BigDecimal | Schema::Decimal | Schema::Uuid(Fixed | Bytes) | Schema::Duration")),
+            ResolvedNode::Union(union) => self.with_union(union)?.deserialize_byte_buf(visitor),
+            _ => Err(self.error("bytes", "Expected ResolvedNode::Bytes | ResolvedNode::Fixed | ResolvedNode::BigDecimal | ResolvedNode::Decimal | ResolvedNode::Uuid(Fixed | Bytes) | ResolvedNode::Duration")),
         }
     }
 
@@ -523,20 +482,20 @@ impl<'de, 's, 'r, R: Read, S: Borrow<Schema>> Deserializer<'de>
     where
         V: Visitor<'de>,
     {
-        if let Schema::Union(union) = self.schema
-            && union.variants().len() == 2
+        if let ResolvedNode::Union(union) = self.schema
+            && union.resolve_schemas().len() == 2
             && union.is_nullable()
         {
             let index = zag_i32(self.reader)?;
             let index = usize::try_from(index).map_err(|e| Details::ConvertI32ToUsize(e, index))?;
             let schema = union.get_variant(index)?;
-            if let Schema::Null = schema {
+            if let ResolvedNode::Null = schema {
                 visitor.visit_none()
             } else {
-                visitor.visit_some(self.with_different_schema(schema)?)
+                visitor.visit_some(self.with_different_schema(schema))
             }
         } else {
-            Err(self.error("option", "Expected Schema::Union([Schema::Null, _])"))
+            Err(self.error("option", "Expected ResolvedNode::Union([ResolvedNode::Null, _])"))
         }
     }
 
@@ -545,9 +504,9 @@ impl<'de, 's, 'r, R: Read, S: Borrow<Schema>> Deserializer<'de>
         V: Visitor<'de>,
     {
         match self.schema {
-            Schema::Null => visitor.visit_unit(),
-            Schema::Union(union) => self.with_union(union)?.deserialize_unit(visitor),
-            _ => Err(self.error("unit", "Expected Schema::Null")),
+            ResolvedNode::Null => visitor.visit_unit(),
+            ResolvedNode::Union(union) => self.with_union(union)?.deserialize_unit(visitor),
+            _ => Err(self.error("unit", "Expected ResolvedNode::Null")),
         }
     }
 
@@ -560,15 +519,15 @@ impl<'de, 's, 'r, R: Read, S: Borrow<Schema>> Deserializer<'de>
         V: Visitor<'de>,
     {
         match self.schema {
-            Schema::Record(record) if record.fields.is_empty() && record.name.name() == name => {
+            ResolvedNode::Record(record) if record.fields.is_empty() && record.name.name() == name => {
                 visitor.visit_unit()
             }
-            Schema::Union(union) => self
+            ResolvedNode::Union(union) => self
                 .with_union(union)?
                 .deserialize_unit_struct(name, visitor),
             _ => Err(self.error(
                 "unit struct",
-                format!("Expected Schema::Record(name: {name}, fields.len() == 0)"),
+                format!("Expected ResolvedNode::Record(name: {name}, fields.len() == 0)"),
             )),
         }
     }
@@ -582,15 +541,16 @@ impl<'de, 's, 'r, R: Read, S: Borrow<Schema>> Deserializer<'de>
         V: Visitor<'de>,
     {
         match self.schema {
-            Schema::Record(record) if record.fields.len() == 1 && record.name.name() == name => {
-                visitor.visit_newtype_struct(self.with_different_schema(&record.fields[0].schema)?)
+            ResolvedNode::Record(ref record) if record.fields.len() == 1 && record.name.name() == name => {
+                let resolved_field = record.fields[0].resolve_field();
+                visitor.visit_newtype_struct(self.with_different_schema(resolved_field))
             }
-            Schema::Union(union) => self
+            ResolvedNode::Union(union) => self
                 .with_union(union)?
                 .deserialize_newtype_struct(name, visitor),
             _ => Err(self.error(
                 "newtype struct",
-                format!("Expected Schema::Record(name: {name}, fields.len() == 1)"),
+                format!("Expected ResolvedNode::Record(name: {name}, fields.len() == 1)"),
             )),
         }
     }
@@ -600,11 +560,11 @@ impl<'de, 's, 'r, R: Read, S: Borrow<Schema>> Deserializer<'de>
         V: Visitor<'de>,
     {
         match self.schema {
-            Schema::Array(array) => {
+            ResolvedNode::Array(array) => {
                 visitor.visit_seq(BlockDeserializer::array(self.reader, array, self.config)?)
             }
-            Schema::Union(union) => self.with_union(union)?.deserialize_seq(visitor),
-            _ => Err(self.error("seq", "Expected Schema::Array")),
+            ResolvedNode::Union(union) => self.with_union(union)?.deserialize_seq(visitor),
+            _ => Err(self.error("seq", "Expected ResolvedNode::Array")),
         }
     }
 
@@ -615,18 +575,18 @@ impl<'de, 's, 'r, R: Read, S: Borrow<Schema>> Deserializer<'de>
         match self.schema {
             // `len == 0` is not possible for derived Deserialize implementations but users might use it.
             // The derived Deserialize implementations use `deserialize_unit` instead
-            Schema::Null if len == 0 => visitor.visit_unit(),
+            ResolvedNode::Null if len == 0 => visitor.visit_unit(),
             schema if len == 1 => {
                 visitor.visit_seq(OneTupleDeserializer::new(self.reader, schema, self.config)?)
             }
-            Schema::Record(record) if record.fields.len() == len => {
+            ResolvedNode::Record(record) if record.fields.len() == len => {
                 visitor.visit_seq(ManyTupleDeserializer::new(self.reader, record, self.config))
             }
-            Schema::Union(union) => self.with_union(union)?.deserialize_tuple(len, visitor),
-            _ if len == 0 => Err(self.error("tuple", "Expected Schema::Null for unit tuple")),
+            ResolvedNode::Union(union) => self.with_union(union)?.deserialize_tuple(len, visitor),
+            _ if len == 0 => Err(self.error("tuple", "Expected ResolvedNode::Null for unit tuple")),
             _ => Err(self.error(
                 "tuple",
-                format!("Expected Schema::Record(fields.len() == {len}) for {len}-tuple"),
+                format!("Expected ResolvedNode::Record(fields.len() == {len}) for {len}-tuple"),
             )),
         }
     }
@@ -641,15 +601,15 @@ impl<'de, 's, 'r, R: Read, S: Borrow<Schema>> Deserializer<'de>
         V: Visitor<'de>,
     {
         match self.schema {
-            Schema::Record(record) if record.name.name() == name && record.fields.len() == len => {
+            ResolvedNode::Record(record) if record.name.name() == name && record.fields.len() == len => {
                 visitor.visit_seq(ManyTupleDeserializer::new(self.reader, record, self.config))
             }
-            Schema::Union(union) => self
+            ResolvedNode::Union(union) => self
                 .with_union(union)?
                 .deserialize_tuple_struct(name, len, visitor),
             _ => Err(self.error(
                 "tuple struct",
-                format!("Expected Schema::Record(name: {name}, fields.len() == {len})"),
+                format!("Expected ResolvedNode::Record(name: {name}, fields.len() == {len})"),
             )),
         }
     }
@@ -659,15 +619,15 @@ impl<'de, 's, 'r, R: Read, S: Borrow<Schema>> Deserializer<'de>
         V: Visitor<'de>,
     {
         match self.schema {
-            Schema::Map(map) => {
+            ResolvedNode::Map(map) => {
                 visitor.visit_map(BlockDeserializer::map(self.reader, map, self.config)?)
             }
-            Schema::Record(record) => {
+            ResolvedNode::Record(record) => {
                 // Needed for flattened structs which are (de)serialized as maps
                 visitor.visit_map(RecordDeserializer::new(self.reader, record, self.config))
             }
-            Schema::Union(union) => self.with_union(union)?.deserialize_map(visitor),
-            _ => Err(self.error("map", "Expected Schema::Map")),
+            ResolvedNode::Union(union) => self.with_union(union)?.deserialize_map(visitor),
+            _ => Err(self.error("map", "Expected ResolvedNode::Map")),
         }
     }
 
@@ -682,15 +642,15 @@ impl<'de, 's, 'r, R: Read, S: Borrow<Schema>> Deserializer<'de>
     {
         match self.schema {
             // Checking that the amount of fields match does not work because of `skip_deserializing`
-            Schema::Record(record)
+            ResolvedNode::Record(record)
                 if record.name.name() == name || name.as_ptr() == DESERIALIZE_ANY.as_ptr() =>
             {
                 visitor.visit_map(RecordDeserializer::new(self.reader, record, self.config))
             }
-            Schema::Union(union) => self
+            ResolvedNode::Union(union) => self
                 .with_union(union)?
                 .deserialize_struct(name, fields, visitor),
-            _ => Err(self.error("struct", format!("Expected Schema::Record(name: {name})"))),
+            _ => Err(self.error("struct", format!("Expected ResolvedNode::Record(name: {name})"))),
         }
     }
 
@@ -705,13 +665,13 @@ impl<'de, 's, 'r, R: Read, S: Borrow<Schema>> Deserializer<'de>
         V: Visitor<'de>,
     {
         match self.schema {
-            Schema::Enum(schema) => {
+            ResolvedNode::Enum(schema) => {
                 visitor.visit_enum(PlainEnumDeserializer::new(self.reader, schema))
             }
-            Schema::Union(union) => {
+            ResolvedNode::Union(union) => {
                 visitor.visit_enum(UnionEnumDeserializer::new(self.reader, union, self.config))
             }
-            _ => Err(self.error("enum", "Expected Schema::Enum | Schema::Union")),
+            _ => Err(self.error("enum", "Expected ResolvedNode::Enum | ResolvedNode::Union")),
         }
     }
 
@@ -720,8 +680,8 @@ impl<'de, 's, 'r, R: Read, S: Borrow<Schema>> Deserializer<'de>
         V: Visitor<'de>,
     {
         match self.schema {
-            Schema::String => self.deserialize_string(visitor),
-            _ => Err(self.error("identifier", "Expected Schema::String")),
+            ResolvedNode::String => self.deserialize_string(visitor),
+            _ => Err(self.error("identifier", "Expected ResolvedNode::String")),
         }
     }
 
@@ -753,7 +713,7 @@ mod tests {
     use super::*;
     use crate::{
         AvroResult, AvroSchema, Decimal, reader::datum::GenericDatumReader,
-        writer::datum::GenericDatumWriter,
+        writer::datum::GenericDatumWriter, schema::Schema
     };
 
     #[expect(
