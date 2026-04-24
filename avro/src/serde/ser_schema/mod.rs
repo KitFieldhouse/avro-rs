@@ -126,7 +126,7 @@ impl<'s, 'w, W: Write> SchemaAwareSerializer<'s, 'w, W> {
             }
             ResolvedNode::Union(union) => UnionSerializer::new(self.writer, union, self.config).checked_write_long(original_ty, v),
             _ => {
-                Err(self.error(original_ty, "Expected ResolvedNode::Long | ResolvedNode::TimeMicros | ResolvedNode::{,Local}Timestamp{Millis,Micros,Nanos}"))
+                Err(self.error(original_ty, "Expected Schema::Long | Schema::TimeMicros | Schema::{,Local}Timestamp{Millis,Micros,Nanos}"))
             }
         }
     }
@@ -280,7 +280,7 @@ impl<'s, 'w, W: Write> Serializer for SchemaAwareSerializer<'s, 'w, W> {
             ResolvedNode::Union(union) => {
                 UnionSerializer::new(self.writer, union, self.config).serialize_char(v)
             }
-            _ => Err(self.error("char", "Expected ResolvedNode::String")),
+            _ => Err(self.error("char", "Expected Schema::String")),
         }
     }
 
@@ -292,7 +292,7 @@ impl<'s, 'w, W: Write> Serializer for SchemaAwareSerializer<'s, 'w, W> {
             ResolvedNode::Union(union) => {
                 UnionSerializer::new(self.writer, union, self.config).serialize_str(v)
             }
-            _ => Err(self.error("str", "Expected ResolvedNode::String | ResolvedNode::Uuid(String)")),
+            _ => Err(self.error("str", "Expected Schema::String | Schema::Uuid(String)")),
         }
     }
 
@@ -311,7 +311,7 @@ impl<'s, 'w, W: Write> Serializer for SchemaAwareSerializer<'s, 'w, W> {
             ResolvedNode::Union(union) => {
                 UnionSerializer::new(self.writer, union, self.config).serialize_bytes(v)
             }
-            _ => Err(self.error("bytes", "Expected ResolvedNode::Bytes | ResolvedNode::Fixed | ResolvedNode::BigDecimal | ResolvedNode::Decimal | ResolvedNode::Uuid(Bytes | Fixed) | ResolvedNode::Duration")),
+            _ => Err(self.error("bytes", "Expected Schema::Bytes | Schema::Fixed | Schema::BigDecimal | Schema::Decimal | Schema::Uuid(Bytes | Fixed) | Schema::Duration")),
         }
     }
 
@@ -322,7 +322,7 @@ impl<'s, 'w, W: Write> Serializer for SchemaAwareSerializer<'s, 'w, W> {
         {
             zig_i32(null_index as i32, &mut *self.writer)
         } else {
-            Err(self.error("none", "Expected ResolvedNode::Union([ResolvedNode::Null, _])"))
+            Err(self.error("none", "Expected Schema::Union([Schema::Null, _])"))
         }
     }
 
@@ -341,7 +341,7 @@ impl<'s, 'w, W: Write> Serializer for SchemaAwareSerializer<'s, 'w, W> {
                 value.serialize(self.with_different_schema(node)?)?;
             Ok(bytes_written)
         } else {
-            Err(self.error("some", "Expected ResolvedNode::Union([ResolvedNode::Null, _])"))
+            Err(self.error("some", "Expected Schema::Union([Schema::Null, _])"))
         }
     }
 
@@ -351,7 +351,7 @@ impl<'s, 'w, W: Write> Serializer for SchemaAwareSerializer<'s, 'w, W> {
             ResolvedNode::Union(union) => {
                 UnionSerializer::new(self.writer, union, self.config).serialize_unit()
             }
-            _ => Err(self.error("unit", "Expected ResolvedNode::Null")),
+            _ => Err(self.error("unit", "Expected Schema::Null")),
         }
     }
 
@@ -365,7 +365,7 @@ impl<'s, 'w, W: Write> Serializer for SchemaAwareSerializer<'s, 'w, W> {
             }
             _ => Err(self.error(
                 "unit struct",
-                format!(r#"Expected ResolvedNode::Record(name: "{name}", fields: [])"#),
+                format!(r#"Expected Schema::Record(name: "{name}", fields: [])"#),
             )),
         }
     }
@@ -392,9 +392,9 @@ impl<'s, 'w, W: Write> Serializer for SchemaAwareSerializer<'s, 'w, W> {
                     // Union of records
                     zig_i32(variant_index as i32, &mut *self.writer)
                 }
-                _ => Err(self.error("unit variant", format!("Expected ResolvedNode::Null | ResolvedNode::Record(name: {variant}, fields: []) at index {variant_index} in the union"))),
+                _ => Err(self.error("unit variant", format!("Expected Schema::Null | Schema::Record(name: {variant}, fields: []) at index {variant_index} in the union"))),
             }
-            _ => Err(self.error("unit variant", format!("Expected ResolvedNode::Enum(symbols[{variant_index}] == {variant}) | ResolvedNode::Union(variants[{variant_index}] == ResolvedNode::Null | ResolvedNode::Record(name: {variant}, fields: []))"))),
+            _ => Err(self.error("unit variant", format!("Expected Schema::Enum(symbols[{variant_index}] == {variant}) | Schema::Union(variants[{variant_index}] == Schema::Null | Schema::Record(name: {variant}, fields: []))"))),
         }
     }
 
@@ -415,7 +415,7 @@ impl<'s, 'w, W: Write> Serializer for SchemaAwareSerializer<'s, 'w, W> {
                 .serialize_newtype_struct(name, value),
             _ => Err(self.error(
                 "newtype struct",
-                format!("Expected ResolvedNode::Record(name: {name}, fields: [_])"),
+                format!("Expected Schema::Record(name: {name}, fields: [_])"),
             )),
         }
     }
@@ -452,7 +452,7 @@ impl<'s, 'w, W: Write> Serializer for SchemaAwareSerializer<'s, 'w, W> {
                     Ok(bytes_written)
                 }
             },
-            _ => Err(self.error("newtype variant", "Expected ResolvedNode::Union")),
+            _ => Err(self.error("newtype variant", "Expected Schema::Union")),
         }
     }
 
@@ -464,7 +464,7 @@ impl<'s, 'w, W: Write> Serializer for SchemaAwareSerializer<'s, 'w, W> {
             ResolvedNode::Union(union) => {
                 UnionSerializer::new(self.writer, union, self.config).serialize_seq(len)
             }
-            _ => Err(self.error("seq", "Expected ResolvedNode::Array")),
+            _ => Err(self.error("seq", "Expected Schema::Array")),
         }
     }
 
@@ -488,7 +488,7 @@ impl<'s, 'w, W: Write> Serializer for SchemaAwareSerializer<'s, 'w, W> {
             // This error case can only happen for len > 1
             _ => Err(self.error(
                 "tuple",
-                format!("Expected ResolvedNode::Record(fields.len() == {len})"),
+                format!("Expected Schema::Record(fields.len() == {len})"),
             )),
         }
     }
@@ -511,7 +511,7 @@ impl<'s, 'w, W: Write> Serializer for SchemaAwareSerializer<'s, 'w, W> {
                 .serialize_tuple_struct(name, len),
             _ => Err(self.error(
                 "tuple struct",
-                format!("Expected ResolvedNode::Record(name: {name}, fields.len() == {len})"),
+                format!("Expected Schema::Record(name: {name}, fields.len() == {len})"),
             )),
         }
     }
@@ -536,7 +536,7 @@ impl<'s, 'w, W: Write> Serializer for SchemaAwareSerializer<'s, 'w, W> {
                 Some(bytes_written),
             ))
         } else {
-            Err(self.error("tuple variant", format!("Expected ResolvedNode::Union(variants[{variant_index}] == ResolvedNode::Record(name: {variant}, fields.len() == {len}))")))
+            Err(self.error("tuple variant", format!("Expected Schema::Union(variants[{variant_index}] == Schema::Record(name: {variant}, fields.len() == {len}))")))
         }
     }
 
@@ -563,7 +563,7 @@ impl<'s, 'w, W: Write> Serializer for SchemaAwareSerializer<'s, 'w, W> {
             }
             _ => Err(self.error(
                 "map",
-                "Expected ResolvedNode::Map | ResolvedNode::Record for structs with flattened fields",
+                "Expected Schema::Map | Schema::Record for structs with flattened fields",
             )),
         }
     }
@@ -586,7 +586,7 @@ impl<'s, 'w, W: Write> Serializer for SchemaAwareSerializer<'s, 'w, W> {
             ResolvedNode::Union(union) => {
                 UnionSerializer::new(self.writer, union, self.config).serialize_struct(name, len)
             }
-            _ => Err(self.error("struct", "Expected ResolvedNode::Record")),
+            _ => Err(self.error("struct", "Expected Schema::Record")),
         }
     }
 
@@ -610,7 +610,7 @@ impl<'s, 'w, W: Write> Serializer for SchemaAwareSerializer<'s, 'w, W> {
                 Some(bytes_written),
             ))
         } else {
-            Err(self.error("struct variant", format!("Expected ResolvedNode::Union(variants[{variant_index}] == ResolvedNode::Record(name: {variant}, fields.len() == {len}))")))
+            Err(self.error("struct variant", format!("Expected Schema::Union(variants[{variant_index}] == Schema::Record(name: {variant}, fields.len() == {len}))")))
         }
     }
 
