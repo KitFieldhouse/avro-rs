@@ -518,7 +518,7 @@ pub struct ResolvedRecord<'a>{
     pub doc: &'a Documentation,
     pub lookup: &'a BTreeMap<String, usize>,
     pub attributes: &'a BTreeMap<String, JsonValue>,
-    pub fields: Arc<[ResolvedRecordField<'a>]>,
+    pub fields: Vec<ResolvedRecordField<'a>>,
 
     root: &'a ResolvedSchema,
 
@@ -532,7 +532,7 @@ pub struct ResolvedRecordField<'a>{
     pub name: &'a String,
     pub doc: &'a Documentation,
     pub aliases: &'a Vec<String>,
-    pub default: Arc<Option<crate::types::Value>>,
+    pub default: Option<crate::types::Value>,
     pub custom_attributes: &'a BTreeMap<String, JsonValue>,
 
     record_field: &'a RecordField,
