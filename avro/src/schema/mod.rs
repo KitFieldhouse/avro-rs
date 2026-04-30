@@ -193,92 +193,22 @@ impl SchemaWithSymbols{
     }
 }
 
-//pub(crate) fn unravel_inner(schema: &mut Schema, defined_schemata: & NameMap, placed_schemata: &mut NameSet, alias_map: &mut HashMap<Name, Arc<Name>>){
-//    match schema {
-//        Schema::Ref{name}=> {
-//            if !placed_schemata.contains(name) && defined_schemata.contains_key(name){
-//                let mut definition = defined_schemata.get(name).unwrap().as_ref().clone();
-//                unravel_inner(&mut definition, defined_schemata, placed_schemata, alias_map);
-//                *schema = definition;
-//            }else if alias_map.contains_key(name) {
-//               *schema = Schema::Ref{name: Arc::clone(alias_map.get(name).unwrap())};
-//            }
-//        },
-//        Schema::Record(record_schema) => {
-//            let mut not_placed = placed_schemata.insert(Arc::clone(&record_schema.name));
-//            if let Some(aliases) = &record_schema.aliases{
-//                not_placed = aliases.iter().fold(not_placed, |acc, alias|{
-//                    alias_map.insert(alias.fully_qualified_name(Option::None).into_owned(), Arc::clone(&record_schema.name));
-//                    acc && placed_schemata.insert(Arc::new(alias.fully_qualified_name(Option::None).into_owned()))
-//                });
-//            };
-//            if !not_placed {
-//                panic!("When converting to complete schema, attempted to double define a schema when unraveling");
-//            }
-//
-//            for field in &mut record_schema.fields {
-//               unravel_inner(&mut field.schema, defined_schemata, placed_schemata, alias_map);
-//            }
-//        }
-//        Schema::Array(array_schema) => {
-//            unravel_inner(&mut array_schema.items, defined_schemata, placed_schemata, alias_map);
-//        }
-//        Schema::Map(map_schema) => {
-//            unravel_inner(map_schema.types.as_mut(), defined_schemata, placed_schemata, alias_map);
-//        }
-//        Schema::Union(union_schema) => {
-//            for el_schema in &mut union_schema.schemas {
-//                unravel_inner(el_schema, defined_schemata, placed_schemata, alias_map);
-//            }
-//        },
-//        Schema::Fixed(fixed_schema) => {
-//            let mut not_placed = placed_schemata.insert(Arc::clone(&fixed_schema.name));
-//            if let Some(aliases) = &fixed_schema.aliases{
-//                not_placed = aliases.iter().fold(not_placed, |acc, alias|{
-//                    alias_map.insert(alias.fully_qualified_name(Option::None).into_owned(), Arc::clone(&fixed_schema.name));
-//                    acc && placed_schemata.insert(Arc::new(alias.fully_qualified_name(Option::None).into_owned()))
-//                });
-//            };
-//            if !not_placed {
-//                panic!("When converting to complete schema, attempted to double define a schema when unraveling");
-//            }
-//        },
-//        Schema::Enum(enum_schema) => {
-//            let mut not_placed = placed_schemata.insert(Arc::clone(&enum_schema.name));
-//            if let Some(aliases) = &enum_schema.aliases{
-//                not_placed = aliases.iter().fold(not_placed, |acc, alias|{
-//                    alias_map.insert(alias.fully_qualified_name(Option::None).into_owned(), Arc::clone(&enum_schema.name));
-//                    acc && placed_schemata.insert(Arc::new(alias.fully_qualified_name(Option::None).into_owned()))
-//                });
-//            };
-//            if !not_placed {
-//                panic!("When converting to complete schema, attempted to double define a schema when unraveling");
-//            }
-//        },
-//        Schema::Duration(fixed_schema) => {
-//            unravel_inner(&mut fixed_schema, defined_schemata, placed_schemata, alias_map);
-//        },
-//        Schema::Array(array_schema) => {
-//            unravel_inner(&mut array_schema.items, defined_schemata, placed_schemata, alias_map);
-//        },
-//        Schema::Array(array_schema) => {
-//            unravel_inner(&mut array_schema.items, defined_schemata, placed_schemata, alias_map);
-//        }
-//        _ => {}
-//    }
-//}
-
-// KTODO:: LEFT OFF -- NEED TO DO ALIAS NAME NORMALIZATION
-pub(crate) fn unravel_inner(schema: &mut Schema, defined_schemata: & NameMap, placed_schemata: &mut NameSet, alias_map: &mut HashMap<Name, Arc<Name>>){
-    if let Schema::Ref{name} = schema &&
-            !placed_schemata.contains(name) &&
-            defined_schemata.contains_key(name){
-                let mut definition = defined_schemata.get(name).unwrap().as_ref().clone();
-                unravel_inner(&mut definition, defined_schemata, placed_schemata, alias_map);
-                *schema = definition;
+pub(crate) fn unravel_inner(schema: &mut Schema, defined_schemata: & NameMap, placed_schemata: &mut NameSet, alias_map: &mut HashMap<Arc<Name>, Arc<Name>>){
+    if let Schema::Ref{name} = schema {
+            if !placed_schemata.contains(name) &&
+                defined_schemata.contains_key(name){
+                    let mut definition = defined_schemata.get(name).unwrap().as_ref().clone();
+                    unravel_inner(&mut definition, defined_schemata, placed_schemata, alias_map);
+                    *schema = definition;
+            }else if let Some(root_name) = alias_map.get(name){
+                *schema = Schema::Ref{name: Arc::clone(root_name)};
+            }
     }else{
-        if let Some(names) = schema.name_and_aliases(){
-            placed_schemata.extend(names.into_iter().map(|name| name.into()));
+        if let Some(name) = schema.name(){
+            placed_schemata.extend(schema.name_and_aliases().unwrap());
+            if let Some(aliases) = schema.aliases(){
+                alias_map.extend(aliases.iter().map(|alias|{(alias.name_struct(), Arc::clone(name))}));
+            }
         }
 
         if let Some(children) = schema.children(){
@@ -938,27 +868,27 @@ impl Schema {
 
     /// Returns all the fully qualified names and aliases
     /// of the given schema.
-    pub fn name_and_aliases(&self) -> Option<Vec<Name>>{ // KTODO: This could be sped up by making
-                                                         // aliases arc referenced
-        let alias_strings : Option<Vec<Name>> = self.aliases()
+    pub fn name_and_aliases(&self) -> Option<Vec<Arc<Name>>>{
+        let aliases_opt : Option<Vec<Arc<Name>>> = self.aliases()
             .map(|aliases|{
                 aliases.iter()
-                    .map(|alias|{alias.fully_qualified_name(None).into_owned()
+                    .map(|alias|{
+                        alias.name_struct()
                     }).collect()
             });
 
-        let name_string = self.name();
+        let name_opt = self.name().map(|name|{Arc::clone(name)});
 
-        match (alias_strings, name_string){
+        match (aliases_opt, name_opt){
             (Some(mut aliases), Some(name))=>{
-                aliases.push(name.as_ref().clone());
+                aliases.push(name);
                 Some(aliases)
             }
             (Some(aliases), None)=>{
                 Some(aliases)
             }
             (None, Some(name))=>{
-                Some(vec![name.as_ref().clone()])
+                Some(vec![name])
             }
             (None, None)=>{
                 None
