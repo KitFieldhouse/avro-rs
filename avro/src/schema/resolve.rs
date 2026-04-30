@@ -480,64 +480,38 @@ impl ResolvedSchema{
 /// An Avro array that makes a type level promise that its `"item"` schema is fully resolved.
 #[derive(Clone, Debug)]
 pub struct ResolvedArray<'a>{
-    pub attributes: &'a BTreeMap<String, JsonValue>,
-    items: &'a Schema,
     root: &'a ResolvedSchema,
-
-    schema: &'a Schema,
+    array_schema: &'a ArraySchema,
 }
 
 /// An Avro map that makes a type level promise that its `"types"` schema is fully resolved
 #[derive(Clone, Debug)]
 pub struct ResolvedMap<'a>{
-    pub attributes: &'a BTreeMap<String, JsonValue>,
-    types: &'a Schema,
     root: &'a ResolvedSchema,
-
-    schema: &'a Schema
+    map_schema: &'a MapSchema
 }
 
 /// An Avro union that makes a type level promise that the schemata it contains are all fully resolved.
 #[derive(Clone, Debug, Copy)]
 pub struct ResolvedUnion<'a>{
-    pub variant_index: &'a BTreeMap<SchemaKind, usize>,
-
-    union_schema: &'a UnionSchema,
-    schemas: &'a[Schema],
     root: &'a ResolvedSchema,
-
-    schema: &'a Schema
+    union_schema: &'a UnionSchema
 }
 
 /// An Avro record that makes a type level promise that each of its field's schemata are fully
 /// resolved and any provided default value has been resolved against this schema.
 #[derive(Clone,Debug)]
 pub struct ResolvedRecord<'a>{
-    pub name: &'a Arc<Name>,
-    pub aliases: &'a Aliases,
-    pub doc: &'a Documentation,
-    pub lookup: &'a BTreeMap<String, usize>,
-    pub attributes: &'a BTreeMap<String, JsonValue>,
-    pub fields: Vec<ResolvedRecordField<'a>>,
-
     root: &'a ResolvedSchema,
-
-    schema: &'a Schema,
+    record_schema: &'a RecordSchema,
 }
 
 /// An Avro record field that makes a type level promise that its schema is fully resolved and any
 /// provided default value has been resolved against this schema.
 #[derive(Clone,Debug)]
 pub struct ResolvedRecordField<'a>{
-    pub name: &'a String,
-    pub doc: &'a Documentation,
-    pub aliases: &'a Vec<String>,
-    pub default: Option<crate::types::Value>,
-    pub custom_attributes: &'a BTreeMap<String, JsonValue>,
-
-    record_field: &'a RecordField,
-    schema: &'a Schema,
-    root: &'a ResolvedSchema
+    root: &'a ResolvedSchema,
+    field_schema: &'a RecordField
 }
 
 /// A node within a walk of a Avro Schema that makes the type level promise that its children
@@ -581,8 +555,8 @@ impl<'a> ResolvedNode<'a> {
 
    fn from_schema(schema: &'a Schema, root: &'a ResolvedSchema) -> ResolvedNode<'a>{
        match schema {
-        Schema::Map(MapSchema{attributes, types}) => ResolvedNode::Map(ResolvedMap{attributes, types, root, schema}),
-        Schema::Union(union_schema) => ResolvedNode::Union(ResolvedUnion{union_schema, schemas: &union_schema.schemas, variant_index: &union_schema.variant_index, root,schema}),
+        Schema::Map(map_schema) => ResolvedNode::Map(ResolvedMap{root, map_schema}),
+        Schema::Union(union_schema) => ResolvedNode::Union(ResolvedUnion{root, union_schema}),
         Schema::Array(ArraySchema { items, attributes }) => ResolvedNode::Array(ResolvedArray{items, attributes, root,schema}),
         Schema::Record(RecordSchema { name, aliases, doc, fields, lookup, attributes }) => {
             let fields : Vec<_> = fields.iter()
