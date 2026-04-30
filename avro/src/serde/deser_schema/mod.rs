@@ -107,7 +107,7 @@ impl<'s, 'r, R: Read> SchemaAwareDeserializer<'s, 'r, R> {
             ResolvedNode::Int | ResolvedNode::Date | ResolvedNode::TimeMillis => zag_i32(self.reader),
             _ => Err(self.error(
                 original_ty,
-                "Expected ResolvedNode::Int | ResolvedNode::Date | ResolvedNode::TimeMillis",
+                "Expected Schema::Int | Schema::Date | Schema::TimeMillis",
             )),
         }
     }
@@ -123,7 +123,7 @@ impl<'s, 'r, R: Read> SchemaAwareDeserializer<'s, 'r, R> {
             | ResolvedNode::LocalTimestampNanos => zag_i64(self.reader),
             _ => Err(self.error(
                 original_ty,
-                "Expected ResolvedNode::Long | ResolvedNode::TimeMicros | ResolvedNode::{,Local}Timestamp{Millis,Micros,Nanos}",
+                "Expected Schema::Long | Schema::TimeMicros | Schema::{,Local}Timestamp{Millis,Micros,Nanos}",
             )),
 
         }
@@ -247,7 +247,7 @@ impl<'de, 's, 'r, R: Read> Deserializer<'de>
                 }
             }
             ResolvedNode::Union(union) => self.with_union(union)?.deserialize_bool(visitor),
-            _ => Err(self.error("bool", "Expected ResolvedNode::Boolean")),
+            _ => Err(self.error("bool", "Expected Schema::Boolean")),
         }
     }
 
@@ -311,7 +311,7 @@ impl<'de, 's, 'r, R: Read> Deserializer<'de>
                 visitor.visit_i128(i128::from_le_bytes(self.read_array()?))
             }
             ResolvedNode::Union(union) => self.with_union(union)?.deserialize_i128(visitor),
-            _ => Err(self.error("i128", r#"Expected ResolvedNode::Fixed(name: "i128", size: 16)"#)),
+            _ => Err(self.error("i128", r#"Expected Schema::Fixed(name: "i128", size: 16)"#)),
         }
     }
 
@@ -368,7 +368,7 @@ impl<'de, 's, 'r, R: Read> Deserializer<'de>
                 visitor.visit_u64(u64::from_le_bytes(self.read_array()?))
             }
             ResolvedNode::Union(union) => self.with_union(union)?.deserialize_u64(visitor),
-            _ => Err(self.error("u64", r#"Expected ResolvedNode::Fixed(name: "u64", size: 8)"#)),
+            _ => Err(self.error("u64", r#"Expected Schema::Fixed(name: "u64", size: 8)"#)),
         }
     }
 
@@ -381,7 +381,7 @@ impl<'de, 's, 'r, R: Read> Deserializer<'de>
                 visitor.visit_u128(u128::from_le_bytes(self.read_array()?))
             }
             ResolvedNode::Union(union) => self.with_union(union)?.deserialize_u128(visitor),
-            _ => Err(self.error("u128", r#"Expected ResolvedNode::Fixed(name: "u128", size: 16)"#)),
+            _ => Err(self.error("u128", r#"Expected Schema::Fixed(name: "u128", size: 16)"#)),
         }
     }
 
@@ -392,7 +392,7 @@ impl<'de, 's, 'r, R: Read> Deserializer<'de>
         match self.schema {
             ResolvedNode::Float => visitor.visit_f32(f32::from_le_bytes(self.read_array()?)),
             ResolvedNode::Union(union) => self.with_union(union)?.deserialize_f32(visitor),
-            _ => Err(self.error("f32", "Expected ResolvedNode::Float")),
+            _ => Err(self.error("f32", "Expected Schema::Float")),
         }
     }
 
@@ -403,7 +403,7 @@ impl<'de, 's, 'r, R: Read> Deserializer<'de>
         match self.schema {
             ResolvedNode::Double => visitor.visit_f64(f64::from_le_bytes(self.read_array()?)),
             ResolvedNode::Union(union) => self.with_union(union)?.deserialize_f64(visitor),
-            _ => Err(self.error("f64", "Expected ResolvedNode::Double")),
+            _ => Err(self.error("f64", "Expected Schema::Double")),
         }
     }
 
@@ -431,7 +431,7 @@ impl<'de, 's, 'r, R: Read> Deserializer<'de>
                 }
             }
             ResolvedNode::Union(union) => self.with_union(union)?.deserialize_char(visitor),
-            _ => Err(self.error("char", "Expected ResolvedNode::String")),
+            _ => Err(self.error("char", "Expected Schema::String")),
         }
     }
 
@@ -451,7 +451,7 @@ impl<'de, 's, 'r, R: Read> Deserializer<'de>
                 visitor.visit_string(self.read_string()?)
             }
             ResolvedNode::Union(union) => self.with_union(union)?.deserialize_string(visitor),
-            _ => Err(self.error("string", "Expected ResolvedNode::String | ResolvedNode::Uuid(String)")),
+            _ => Err(self.error("string", "Expected Schema::String | Schema::Uuid(String)")),
         }
     }
 
@@ -474,7 +474,7 @@ impl<'de, 's, 'r, R: Read> Deserializer<'de>
                 visitor.visit_byte_buf(self.read_bytes(fixed.size)?)
             }
             ResolvedNode::Union(union) => self.with_union(union)?.deserialize_byte_buf(visitor),
-            _ => Err(self.error("bytes", "Expected ResolvedNode::Bytes | ResolvedNode::Fixed | ResolvedNode::BigDecimal | ResolvedNode::Decimal | ResolvedNode::Uuid(Fixed | Bytes) | ResolvedNode::Duration")),
+            _ => Err(self.error("bytes", "Expected Schema::Bytes | Schema::Fixed | Schema::BigDecimal | Schema::Decimal | Schema::Uuid(Fixed | Bytes) | Schema::Duration")),
         }
     }
 
@@ -495,7 +495,7 @@ impl<'de, 's, 'r, R: Read> Deserializer<'de>
                 visitor.visit_some(self.with_different_schema(schema))
             }
         } else {
-            Err(self.error("option", "Expected ResolvedNode::Union([ResolvedNode::Null, _])"))
+            Err(self.error("option", "Expected Schema::Union([Schema::Null, _])"))
         }
     }
 
@@ -506,7 +506,7 @@ impl<'de, 's, 'r, R: Read> Deserializer<'de>
         match self.schema {
             ResolvedNode::Null => visitor.visit_unit(),
             ResolvedNode::Union(union) => self.with_union(union)?.deserialize_unit(visitor),
-            _ => Err(self.error("unit", "Expected ResolvedNode::Null")),
+            _ => Err(self.error("unit", "Expected Schema::Null")),
         }
     }
 
@@ -527,7 +527,7 @@ impl<'de, 's, 'r, R: Read> Deserializer<'de>
                 .deserialize_unit_struct(name, visitor),
             _ => Err(self.error(
                 "unit struct",
-                format!("Expected ResolvedNode::Record(name: {name}, fields.len() == 0)"),
+                format!("Expected Schema::Record(name: {name}, fields.len() == 0)"),
             )),
         }
     }
@@ -550,7 +550,7 @@ impl<'de, 's, 'r, R: Read> Deserializer<'de>
                 .deserialize_newtype_struct(name, visitor),
             _ => Err(self.error(
                 "newtype struct",
-                format!("Expected ResolvedNode::Record(name: {name}, fields.len() == 1)"),
+                format!("Expected Schema::Record(name: {name}, fields.len() == 1)"),
             )),
         }
     }
@@ -564,7 +564,7 @@ impl<'de, 's, 'r, R: Read> Deserializer<'de>
                 visitor.visit_seq(BlockDeserializer::array(self.reader, array, self.config)?)
             }
             ResolvedNode::Union(union) => self.with_union(union)?.deserialize_seq(visitor),
-            _ => Err(self.error("seq", "Expected ResolvedNode::Array")),
+            _ => Err(self.error("seq", "Expected Schema::Array")),
         }
     }
 
@@ -583,10 +583,10 @@ impl<'de, 's, 'r, R: Read> Deserializer<'de>
                 visitor.visit_seq(ManyTupleDeserializer::new(self.reader, record, self.config))
             }
             ResolvedNode::Union(union) => self.with_union(union)?.deserialize_tuple(len, visitor),
-            _ if len == 0 => Err(self.error("tuple", "Expected ResolvedNode::Null for unit tuple")),
+            _ if len == 0 => Err(self.error("tuple", "Expected Schema::Null for unit tuple")),
             _ => Err(self.error(
                 "tuple",
-                format!("Expected ResolvedNode::Record(fields.len() == {len}) for {len}-tuple"),
+                format!("Expected Schema::Record(fields.len() == {len}) for {len}-tuple"),
             )),
         }
     }
@@ -609,7 +609,7 @@ impl<'de, 's, 'r, R: Read> Deserializer<'de>
                 .deserialize_tuple_struct(name, len, visitor),
             _ => Err(self.error(
                 "tuple struct",
-                format!("Expected ResolvedNode::Record(name: {name}, fields.len() == {len})"),
+                format!("Expected Schema::Record(name: {name}, fields.len() == {len})"),
             )),
         }
     }
@@ -627,7 +627,7 @@ impl<'de, 's, 'r, R: Read> Deserializer<'de>
                 visitor.visit_map(RecordDeserializer::new(self.reader, record, self.config))
             }
             ResolvedNode::Union(union) => self.with_union(union)?.deserialize_map(visitor),
-            _ => Err(self.error("map", "Expected ResolvedNode::Map")),
+            _ => Err(self.error("map", "Expected Schema::Map")),
         }
     }
 
@@ -650,7 +650,7 @@ impl<'de, 's, 'r, R: Read> Deserializer<'de>
             ResolvedNode::Union(union) => self
                 .with_union(union)?
                 .deserialize_struct(name, fields, visitor),
-            _ => Err(self.error("struct", format!("Expected ResolvedNode::Record(name: {name})"))),
+            _ => Err(self.error("struct", format!("Expected Schema::Record(name: {name})"))),
         }
     }
 
@@ -671,7 +671,7 @@ impl<'de, 's, 'r, R: Read> Deserializer<'de>
             ResolvedNode::Union(union) => {
                 visitor.visit_enum(UnionEnumDeserializer::new(self.reader, union, self.config))
             }
-            _ => Err(self.error("enum", "Expected ResolvedNode::Enum | ResolvedNode::Union")),
+            _ => Err(self.error("enum", "Expected Schema::Enum | Schema::Union")),
         }
     }
 
@@ -681,7 +681,7 @@ impl<'de, 's, 'r, R: Read> Deserializer<'de>
     {
         match self.schema {
             ResolvedNode::String => self.deserialize_string(visitor),
-            _ => Err(self.error("identifier", "Expected ResolvedNode::String")),
+            _ => Err(self.error("identifier", "Expected Schema::String")),
         }
     }
 
