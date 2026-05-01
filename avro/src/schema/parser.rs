@@ -524,7 +524,7 @@ impl Parser {
             }
 
             for alias in &field.aliases {
-                lookup.insert(alias.as_str().into(), position);
+                lookup.insert(Arc::clone(alias), position);
             }
         }
 

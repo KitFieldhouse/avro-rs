@@ -403,9 +403,9 @@ impl Checker {
                     // Can't use RecordField.lookup as aliases are also inserted into there and we
                     // are not allowed to match on writer aliases.
                     // Search using field name and *after* that aliases.
-                    if let Some(w_field) = once(&r_field.name.to_string())
+                    if let Some(w_field) = once(&r_field.name)
                         .chain(r_field.aliases.iter())
-                        .find_map(|ra| w_fields.iter().find(|wf| wf.name.as_ref() == ra))
+                        .find_map(|ra| w_fields.iter().find(|wf| &wf.name == ra))
                     {
                         // Check that the schemas are compatible
                         match self.full_match_schemas(&w_field.schema, &r_field.schema) {

@@ -22,7 +22,7 @@ use strum::Display;
 
 use crate::schema::{Aliases, ArraySchema, DecimalSchema, DefaultToResolve, Documentation, EnumSchema, FixedSchema, InnerDecimalSchema, MapSchema, Name, NameMap, NameSet, RecordField, RecordSchema, Schema, SchemaKind, SchemaWithSymbols, UnionSchema, UuidSchema, unravel_inner};
 use crate::types::Value;
-use crate::{AvroResult, types};
+use crate::{AvroResult, Decimal, types};
 use crate::error::{Details,Error};
 use std::borrow::Borrow;
 use std::collections::BTreeMap;
@@ -613,9 +613,53 @@ impl<'a> ResolvedNode<'a> {
         }
    }
 
-   // KTODO: docs, need to think about a bit more!
-   pub fn unravel(&self)->Schema{
-       todo!()
+    /// Unravels this [`ResolvedNode`] into a [`Schema`]
+    pub fn unravel(&self)-> Schema{
+        match self{
+            ResolvedNode::Null => Schema::Null,
+            ResolvedNode::Boolean => Schema::Boolean,
+            ResolvedNode::Int => Schema::Int,
+            ResolvedNode::Long => Schema::Long,
+            ResolvedNode::Float => Schema::Float,
+            ResolvedNode::Double => Schema::Double,
+            ResolvedNode::Bytes => Schema::Bytes,
+            ResolvedNode::String => Schema::String,
+            ResolvedNode::BigDecimal => Schema::BigDecimal,
+            ResolvedNode::Date => Schema::Date,
+            ResolvedNode::TimeMillis => Schema::TimeMillis,
+            ResolvedNode::TimeMicros => Schema::TimeMicros,
+            ResolvedNode::TimestampMillis => Schema::TimestampMillis,
+            ResolvedNode::TimestampMicros => Schema::TimestampMicros,
+            ResolvedNode::TimestampNanos => Schema::TimestampNanos,
+            ResolvedNode::LocalTimestampMillis => Schema::LocalTimestampMillis,
+            ResolvedNode::LocalTimestampMicros => Schema::LocalTimestampMicros,
+            ResolvedNode::LocalTimestampNanos => Schema::LocalTimestampNanos,
+            ResolvedNode::Uuid(uuid) => Schema::Uuid((*uuid).clone()),
+            ResolvedNode::Duration(fixed_schema) => Schema::Duration((*fixed_schema).clone()),
+            ResolvedNode::Enum(enum_schema) => Schema::Enum((*enum_schema).clone()),
+            ResolvedNode::Fixed(fixed_schema) => Schema::Fixed((*fixed_schema).clone()),
+            ResolvedNode::Decimal(decimal_schema) => Schema::Decimal((*decimal_schema).clone()),
+            ResolvedNode::Array(resolved_array) => {
+                let mut schema = Schema::Array(resolved_array.array_schema.clone());
+                unravel_inner(&mut schema, &resolved_array.root.context.definitions, &mut HashSet::new(), &mut HashMap::new());
+                schema
+            },
+            ResolvedNode::Map(resolved_map)=> {
+                let mut schema = Schema::Map(resolved_map.map_schema.clone());
+                unravel_inner(&mut schema, &resolved_map.root.context.definitions, &mut HashSet::new(), &mut HashMap::new());
+                schema
+            },
+            ResolvedNode::Union(resolved_union) => {
+                let mut schema = Schema::Union(resolved_union.union_schema.clone());
+                unravel_inner(&mut schema, &resolved_union.root.context.definitions, &mut HashSet::new(), &mut HashMap::new());
+                schema
+            },
+            ResolvedNode::Record(resolved_record) => {
+                let mut schema = Schema::Record(resolved_record.record_schema.clone());
+                unravel_inner(&mut schema, &resolved_record.root.context.definitions, &mut HashSet::new(), &mut HashMap::new());
+                schema
+            },
+       }
    }
 }
 
@@ -758,7 +802,7 @@ impl<'a> ResolvedUnion<'a>{
 
     pub fn structural_match_on_schema(&'a self, value: &types::Value) -> Option<(usize,ResolvedNode<'a>)>{
         let value_schema_kind = SchemaKind::from(value);
-        if let Some(i) = self.index_of_schema_kind(&value_schema_kind) {
+        if let Some(i) = self.index_of_schema_kind(value_schema_kind) {
             // fast path
             let variant_clone = self.get_variant(i).unwrap().clone();
             if value
@@ -771,7 +815,7 @@ impl<'a> ResolvedUnion<'a>{
             }
         } else {
             // slow path (required for matching logical or named types)
-            self.variants().into_iter().enumerate().find(|(_, resolved_node)| {
+            self.variants().enumerate().find(|(_, resolved_node)| {
                 value
                     .clone()
                     .resolve_internal(resolved_node.clone())
@@ -791,7 +835,7 @@ impl<'a> ResolvedUnion<'a>{
         &'s self,
         name: &str,
     ) -> Option<(usize, ResolvedNode<'a>)> {
-        self.variants().into_iter().enumerate().find(|(_index, node)|{
+        self.variants().enumerate().find(|(_index, node)|{
             node.get_name()
                 .is_some_and(|schema_name|{schema_name.name() == name})
         })
@@ -802,7 +846,7 @@ impl<'a> ResolvedUnion<'a>{
         &self,
         size: usize,
     ) -> Option<(usize, &'a FixedSchema)> {
-        self.variants().into_iter().enumerate().find_map(|(index, node)|{
+        self.variants().enumerate().find_map(|(index, node)|{
             match node {
                 ResolvedNode::Fixed(fixed)
                 | ResolvedNode::Uuid(UuidSchema::Fixed(fixed))
@@ -825,7 +869,7 @@ impl<'a> ResolvedUnion<'a>{
         &self,
         n_fields: usize,
     ) -> Option<(usize, ResolvedRecord<'a>)> {
-        self.variants().into_iter().enumerate().find_map(|(index, node)|{
+        self.variants().enumerate().find_map(|(index, node)|{
             match node {
                 ResolvedNode::Record(record) if record.record_schema.fields.len() == n_fields => {
                     Some((index, record))
@@ -878,7 +922,7 @@ impl<'a> ResolvedRecordField<'a>{
         }
     }
 
-    pub fn aliases(&self) -> &'a Vec<String>{
+    pub fn aliases(&self) -> &'a Vec<Arc<str>>{
         &self.field.aliases
     }
 
@@ -2635,7 +2679,7 @@ mod tests {
 
     #[test]
     fn dont_allow_close_but_not_identical_definitions() -> TestResult{
-        let union = r#"[someRecord, someOtherRecord]"#;
+        let union = "[someRecord, someOtherRecord]";
 
         let schema1 = r#"
         {

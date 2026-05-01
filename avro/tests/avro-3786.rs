@@ -145,15 +145,15 @@ fn avro_3786_deserialize_union_with_different_enum_order() -> TestResult {
     match deser_value {
         types::Value::Record(fields) => {
             assert_eq!(fields.len(), 2);
-            assert_eq!(fields[0].0, "barInit");
+            assert_eq!(fields[0].0.as_ref(), "barInit");
             assert_eq!(fields[0].1, types::Value::Enum(0, "bar1".to_string()));
-            assert_eq!(fields[1].0, "barUseParent");
+            assert_eq!(fields[1].0.as_ref(), "barUseParent");
             assert_eq!(
                 fields[1].1,
                 types::Value::Union(
                     1,
                     Box::new(types::Value::Record(vec![(
-                        "barUse".to_string(),
+                        "barUse".into(),
                         types::Value::Enum(0, "bar1".to_string())
                     )]))
                 )
@@ -274,7 +274,7 @@ fn avro_3786_deserialize_union_with_different_enum_order_defined_in_record() -> 
     match deser_value {
         types::Value::Record(fields) => {
             assert_eq!(fields.len(), 1);
-            assert_eq!(fields[0].0, "barParent");
+            assert_eq!(fields[0].0.as_ref(), "barParent");
             // TODO: better validation
         }
         _ => panic!("Expected Value::Record"),
@@ -392,7 +392,7 @@ fn test_avro_3786_deserialize_union_with_different_enum_order_defined_in_record_
     match deser_value {
         types::Value::Record(fields) => {
             assert_eq!(fields.len(), 1);
-            assert_eq!(fields[0].0, "barParent");
+            assert_eq!(fields[0].0.as_ref(), "barParent");
             // TODO: better validation
         }
         _ => panic!("Expected Value::Record"),
@@ -510,7 +510,7 @@ fn test_avro_3786_deserialize_union_with_different_enum_order_defined_in_record_
     match deser_value {
         types::Value::Record(fields) => {
             assert_eq!(fields.len(), 1);
-            assert_eq!(fields[0].0, "barParent");
+            assert_eq!(fields[0].0.as_ref(), "barParent");
             // TODO: better validation
         }
         _ => panic!("Expected Value::Record"),
@@ -628,7 +628,7 @@ fn deserialize_union_with_different_enum_order_defined_in_record() -> TestResult
     match deser_value {
         types::Value::Record(fields) => {
             assert_eq!(fields.len(), 1);
-            assert_eq!(fields[0].0, "barParent");
+            assert_eq!(fields[0].0.as_ref(), "barParent");
             // TODO: better validation
         }
         _ => panic!("Expected Value::Record"),
@@ -903,7 +903,7 @@ fn deserialize_union_with_record_with_enum_defined_inline_reader_has_different_i
     match deser_value {
         types::Value::Record(fields) => {
             assert_eq!(fields.len(), 3);
-            assert_eq!(fields[0].0, "barInit");
+            assert_eq!(fields[0].0.as_ref(), "barInit");
             assert_eq!(fields[0].1, types::Value::Enum(0, "bar0".to_string()));
             // TODO: better validation
         }

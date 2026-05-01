@@ -39,7 +39,7 @@ pub struct RecordField {
     pub doc: Documentation,
     /// Aliases of the field's name. They have no namespace.
     #[builder(default)]
-    pub aliases: Vec<String>, // TODO: maybe wrap this with Arc as well?
+    pub aliases: Vec<Arc<str>>, // TODO: maybe wrap this with Arc as well?
     /// Default value of the field.
     /// This value will be used when reading Avro datum if schema resolution
     /// is enabled.
@@ -118,8 +118,8 @@ impl RecordField {
                     aliases
                         .iter()
                         .flat_map(|alias| alias.as_str())
-                        .map(|alias| alias.to_string())
-                        .collect::<Vec<String>>()
+                        .map(|alias| alias.into())
+                        .collect::<Vec<Arc<str>>>()
                 })
             })
             .unwrap_or_default();
@@ -172,7 +172,8 @@ impl Serialize for RecordField {
         }
 
         if !self.aliases.is_empty() {
-            map.serialize_entry("aliases", &self.aliases)?;
+            let aliases_str : Vec<&str> = self.aliases.iter().map(|alias|{alias.as_ref()}).collect(); // TODO: is this slow?
+            map.serialize_entry("aliases", &aliases_str)?;
         }
 
         for attr in &self.custom_attributes {

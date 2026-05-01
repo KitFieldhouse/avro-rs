@@ -146,9 +146,9 @@ fn avro_3787_deserialize_union_with_unknown_symbol() -> TestResult {
     match deser_value {
         types::Value::Record(fields) => {
             assert_eq!(fields.len(), 2);
-            assert_eq!(fields[0].0, "barInit");
+            assert_eq!(fields[0].0.as_ref(), "barInit");
             assert_eq!(fields[0].1, types::Value::Enum(1, "bar1".to_string()));
-            assert_eq!(fields[1].0, "barUseParent");
+            assert_eq!(fields[1].0.as_ref(), "barUseParent");
             // TODO: test value
         }
         _ => panic!("Expected Value::Record"),
@@ -284,7 +284,7 @@ fn avro_3787_deserialize_union_with_unknown_symbol_no_ref() -> TestResult {
             assert_eq!(fields.len(), 1);
             // assert_eq!(fields[0].0, "barInit");
             // assert_eq!(fields[0].1, types::Value::Enum(0, "bar0".to_string()));
-            assert_eq!(fields[0].0, "barParent");
+            assert_eq!(fields[0].0.as_ref(), "barParent");
             // assert_eq!(fields[1].1, types::Value::Enum(1, "bar1".to_string()));
         }
         _ => panic!("Expected Value::Record"),

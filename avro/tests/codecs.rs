@@ -82,8 +82,8 @@ fn avro_4032_codec_settings(codec: Codec) -> TestResult {
     assert_eq!(
         reader.next().unwrap()?,
         Value::Record(vec![
-            ("f1".to_string(), Value::Int(27)),
-            ("f2".to_string(), Value::String("foo".to_string())),
+            ("f1".into(), Value::Int(27)),
+            ("f2".into(), Value::String("foo".to_string())),
         ])
     );
     assert!(reader.next().is_none());

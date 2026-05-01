@@ -296,8 +296,7 @@ pub(crate) fn encode_internal<W: Write>(
                         schema_field
                             .aliases()
                             .iter()
-                            .find_map(|alias| lookup.get(alias.as_str())) // KTODO: need to look at
-                                                                          // this
+                            .find_map(|alias| lookup.get(alias))
                     });
 
                     if let Some(value) = value_opt {

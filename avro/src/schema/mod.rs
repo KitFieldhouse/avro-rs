@@ -1560,7 +1560,7 @@ mod tests {
             Ok(_) => unreachable!("Expected an error that the name is already defined"),
             Err(e) => assert_eq!(
                 e.to_string(),
-                r#"Unions cannot contain more than one named schema with the same name: A"#
+                "Unions cannot contain more than one named schema with the same name: A"
             ),
         }
 
@@ -2992,7 +2992,7 @@ mod tests {
             assert_eq!(num_field.name.as_ref(), "num");
             assert_eq!(
                 num_field.aliases,
-                vec!["num1".to_string(), "num2".to_string()]
+                vec!["num1".into(), "num2".into()]
             );
         } else {
             panic!("Expected a record schema!");

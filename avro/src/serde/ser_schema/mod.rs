@@ -84,7 +84,6 @@ impl<'s, 'w, W: Write> SchemaAwareSerializer<'s, 'w, W> {
             value_type: ty,
             value: error.into(),
             schema: self.schema
-                .get_resolved()
                 .unravel(),
         })
     }

@@ -148,10 +148,9 @@ impl<'s, 'w, W: Write> SerializeTuple for ManyTupleSerializer<'s, 'w, W> {
             .ok_or_else(|| Details::SerializeRecordUnknownFieldIndex {
                 position: self.field_position,
                 schema: ResolvedNode::Record(self.schema.clone())
-                    .get_resolved()
                     .unravel(),
             })?
-            .resolve_field();
+            .schema();
         self.bytes_written += value.serialize(SchemaAwareSerializer::new(
             self.writer,
             schema,
