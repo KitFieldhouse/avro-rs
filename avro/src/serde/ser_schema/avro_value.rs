@@ -108,7 +108,7 @@ impl<'s, B: Borrow<Value>> Serialize for AvroValueSerialize<'s, B> {
                 serializer.collect_map(record
                     .into_iter()
                     .map(|(key, val)|{
-                        (key, AvroValueSerialize::new(val))
+                        (key.as_ref(), AvroValueSerialize::new(val))
                     }))
             }
             Value::Map(map) => {

@@ -213,12 +213,12 @@ impl<'de, 's, 'r, R: Read> Deserializer<'de>
             ResolvedNode::Map(_) => self.deserialize_map(visitor),
             ResolvedNode::Union(union) => self.with_union(union)?.deserialize_any(visitor),
             ResolvedNode::Record(ref schema) => {
-                if schema.attributes.get("org.apache.avro.rust.tuple")
+                if schema.attributes().get("org.apache.avro.rust.tuple")
                     == Some(&serde_json::Value::Bool(true))
                 {
                     // This attribute is needed because we can't tell the difference between a tuple
                     // and struct, but a tuple needs to be deserialized as a sequence instead of a map.
-                    let len = schema.fields.len();
+                    let len = schema.field_len();
                     self.deserialize_tuple(len, visitor)
                 } else {
                     self.deserialize_struct(DESERIALIZE_ANY, DESERIALIZE_ANY_FIELDS, visitor)
@@ -483,7 +483,7 @@ impl<'de, 's, 'r, R: Read> Deserializer<'de>
         V: Visitor<'de>,
     {
         if let ResolvedNode::Union(union) = self.schema
-            && union.variants().len() == 2
+            && union.variants_len() == 2
             && union.is_nullable()
         {
             let index = zag_i32(self.reader)?;
@@ -519,7 +519,7 @@ impl<'de, 's, 'r, R: Read> Deserializer<'de>
         V: Visitor<'de>,
     {
         match self.schema {
-            ResolvedNode::Record(record) if record.fields.is_empty() && record.name.name() == name => {
+            ResolvedNode::Record(record) if record.no_fields() && record.name().name() == name => {
                 visitor.visit_unit()
             }
             ResolvedNode::Union(union) => self
@@ -541,8 +541,8 @@ impl<'de, 's, 'r, R: Read> Deserializer<'de>
         V: Visitor<'de>,
     {
         match self.schema {
-            ResolvedNode::Record(ref record) if record.fields.len() == 1 && record.name.name() == name => {
-                let resolved_field = record.fields[0].resolve_field();
+            ResolvedNode::Record(ref record) if record.field_len() == 1 && record.name().name() == name => {
+                let resolved_field = record.get_field(0).unwrap().schema();
                 visitor.visit_newtype_struct(self.with_different_schema(resolved_field))
             }
             ResolvedNode::Union(union) => self
@@ -579,7 +579,7 @@ impl<'de, 's, 'r, R: Read> Deserializer<'de>
             schema if len == 1 => {
                 visitor.visit_seq(OneTupleDeserializer::new(self.reader, schema, self.config))
             }
-            ResolvedNode::Record(record) if record.fields.len() == len => {
+            ResolvedNode::Record(record) if record.field_len() == len => {
                 visitor.visit_seq(ManyTupleDeserializer::new(self.reader, record, self.config))
             }
             ResolvedNode::Union(union) => self.with_union(union)?.deserialize_tuple(len, visitor),
@@ -601,7 +601,7 @@ impl<'de, 's, 'r, R: Read> Deserializer<'de>
         V: Visitor<'de>,
     {
         match self.schema {
-            ResolvedNode::Record(record) if record.name.name() == name && record.fields.len() == len => {
+            ResolvedNode::Record(record) if record.name().name() == name && record.field_len() == len => {
                 visitor.visit_seq(ManyTupleDeserializer::new(self.reader, record, self.config))
             }
             ResolvedNode::Union(union) => self
@@ -643,7 +643,7 @@ impl<'de, 's, 'r, R: Read> Deserializer<'de>
         match self.schema {
             // Checking that the amount of fields match does not work because of `skip_deserializing`
             ResolvedNode::Record(record)
-                if record.name.name() == name || name.as_ptr() == DESERIALIZE_ANY.as_ptr() =>
+                if record.name().name() == name || name.as_ptr() == DESERIALIZE_ANY.as_ptr() =>
             {
                 visitor.visit_map(RecordDeserializer::new(self.reader, record, self.config))
             }

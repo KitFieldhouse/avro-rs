@@ -108,7 +108,7 @@ impl<'s, 'r, R: Read> UnionEnumDeserializer<'s, 'r, R> {
     pub fn new(reader: &'r mut R, schema: ResolvedUnion<'s>, config: Config) -> Self {
         Self {
             reader,
-            variants: schema.variants(),
+            variants: schema.variants().collect(),
             config,
         }
     }
@@ -174,7 +174,7 @@ impl<'de, 's, 'r, R: Read> VariantAccess<'de>
     fn unit_variant(self) -> Result<(), Self::Error> {
         match self.schema {
             ResolvedNode::Null => Ok(()),
-            ResolvedNode::Record(record) if record.fields.is_empty() => Ok(()),
+            ResolvedNode::Record(record) if record.no_fields() => Ok(()),
             _ => Err(self.error(
                 "unit variant",
                 "Expected Schema::Null | Schema::Record(fields.len() == 0)",
@@ -188,15 +188,15 @@ impl<'de, 's, 'r, R: Read> VariantAccess<'de>
     {
         match self.schema {
             ResolvedNode::Record(record)
-                if record.fields.len() == 1
+                if record.field_len() == 1
                     && record
-                        .attributes
+                        .attributes()
                         .get("org.apache.avro.rust.union_of_records")
                         == Some(&serde_json::Value::Bool(true)) =>
             {
                 seed.deserialize(SchemaAwareDeserializer::new(
                     self.reader,
-                    record.fields[0].resolve_field(),
+                    record.get_field(0).unwrap().schema(),
                     self.config,
                 ))
             }

@@ -217,9 +217,9 @@ mod tests {
         assert_eq!(
             reader.next().unwrap().unwrap(),
             Value::Record(vec![
-                ("a".to_string(), Value::Long(27)),
-                ("b".to_string(), Value::String("foo".to_string())),
-                ("c".to_string(), Value::Enum(1, "spades".to_string())),
+                ("a".into(), Value::Long(27)),
+                ("b".into(), Value::String("foo".to_string())),
+                ("c".into(), Value::Enum(1, "spades".to_string())),
             ])
         );
         assert!(reader.next().is_none());
@@ -262,9 +262,9 @@ mod tests {
         assert_eq!(
             reader.next().unwrap().unwrap(),
             Value::Record(vec![
-                ("a".to_string(), Value::Long(27)),
-                ("b".to_string(), Value::String("foo".to_string())),
-                ("c".to_string(), Value::Enum(2, "clubs".to_string())),
+                ("a".into(), Value::Long(27)),
+                ("b".into(), Value::String("foo".to_string())),
+                ("c".into(), Value::Enum(2, "clubs".to_string())),
             ])
         );
         assert!(reader.next().is_none());
@@ -304,9 +304,9 @@ mod tests {
         assert_eq!(
             reader.next().unwrap().unwrap(),
             Value::Record(vec![
-                ("a".to_string(), Value::Long(27)),
-                ("b".to_string(), Value::String("foo".to_string())),
-                ("c".to_string(), Value::Enum(2, "clubs".to_string())),
+                ("a".into(), Value::Long(27)),
+                ("b".into(), Value::String("foo".to_string())),
+                ("c".into(), Value::Enum(2, "clubs".to_string())),
             ])
         );
     }

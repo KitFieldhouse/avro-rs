@@ -101,8 +101,8 @@ impl<'de, 's, 'r, R: Read> SeqAccess<'de>
     where
         T: DeserializeSeed<'de>,
     {
-        if self.current_field < self.schema.fields.len() {
-            let schema = self.schema.fields[self.current_field].resolve_field();
+        if self.current_field < self.schema.field_len() {
+            let schema = self.schema.get_field(self.current_field).unwrap().schema();
             let val = seed.deserialize(SchemaAwareDeserializer::new(
                 self.reader,
                 schema,
@@ -116,6 +116,6 @@ impl<'de, 's, 'r, R: Read> SeqAccess<'de>
     }
 
     fn size_hint(&self) -> Option<usize> {
-        Some(self.schema.fields.len() - self.current_field)
+        Some(self.schema.field_len() - self.current_field)
     }
 }

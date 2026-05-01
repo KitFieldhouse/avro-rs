@@ -97,7 +97,7 @@ pub enum Value {
     /// This allows schema-less encoding.
     ///
     /// See [Record](types.Record) for a more user-friendly support.
-    Record(Vec<(String, Value)>),
+    Record(Vec<(Arc<str>, Value)>),
     /// A date value.
     ///
     /// Serialized and deserialized as `i32` directly. Can only be deserialized properly with a
@@ -214,7 +214,7 @@ pub struct Record<'a> {
     /// List of fields contained in the record.
     /// Ordered according to the fields in the schema given to create this
     /// `Record` object. Any unset field defaults to `Value::Null`.
-    pub fields: Vec<(String, Value)>, // KTODO: Should this be arc'd? refers to schemas field names.
+    pub fields: Vec<(Arc<str>, Value)>, // KTODO: Should this be arc'd? refers to schemas field names.
     schema_lookup: &'a BTreeMap<Arc<str>, usize>,
 }
 
@@ -231,7 +231,7 @@ impl Record<'_> {
             }) => {
                 let mut fields = Vec::with_capacity(schema_fields.len());
                 for schema_field in schema_fields.iter() {
-                    fields.push((schema_field.name.to_string(), Value::Null));
+                    fields.push((Arc::clone(&schema_field.name), Value::Null));
                 }
 
                 Some(Record {
@@ -344,7 +344,7 @@ impl TryFrom<Value> for JsonValue {
                 .into_iter()
                 .map(|(key, value)| Self::try_from(value).map(|v| (key, v)))
                 .collect::<Result<Vec<_>, _>>()
-                .map(|v| Self::Object(v.into_iter().collect())),
+                .map(|v| Self::Object(v.into_iter().map(|(key, value)|{(key.to_string(), value)}).collect())),
             Value::Date(d) => Ok(Self::Number(d.into())),
             Value::Decimal(ref d) => <Vec<u8>>::try_from(d)
                 .map(|vec| Self::Array(vec.into_iter().map(|v| v.into()).collect())),
@@ -575,7 +575,7 @@ impl Value {
                 ResolvedNode::Record(resolved_record)
             ) => {
                 let non_nullable_fields_count =
-                    resolved_record.fields().filter(|&rf| !rf.is_nullable()).count();
+                    resolved_record.fields().filter(|rf| !rf.is_nullable()).count();
 
                 // If the record contains fewer fields as required fields by the schema, it is invalid.
                 if record_fields.len() < non_nullable_fields_count {
@@ -597,11 +597,11 @@ impl Value {
                     .fold(None, |acc, (field_name, record_field)| {
                         match resolved_record.lookup().get(field_name) {
                             Some(idx) => {
-                                let resolved_field = fields.get(*idx).unwrap();
+                                let resolved_field = resolved_record.get_field(*idx).unwrap();
                                 Value::accumulate(
                                     acc,
                                     record_field.validate_internal(
-                                        resolved_field.resolve_field()
+                                        resolved_field.schema()
                                     ),
                                 )
                             }
@@ -613,16 +613,16 @@ impl Value {
                     })
             }
             (Value::Map(items), ResolvedNode::Record(resolved_record)) => {
-                resolved_record.fields.iter().fold(None, |acc, field| {
-                    if let Some(item) = items.get(field.name) {
-                        let res = item.validate_internal(field.resolve_field());
+                resolved_record.fields().fold(None, |acc, field| {
+                    if let Some(item) = items.get(field.name().as_ref()) {
+                        let res = item.validate_internal(field.schema());
                         Value::accumulate(acc, res)
                     } else if !field.is_nullable() {
                         Value::accumulate(
                             acc,
                             Some(format!(
                                 "Field with name '{:?}' is not a member of the map items",
-                                field.name
+                                field.name()
                             )),
                         )
                     } else {
@@ -1114,35 +1114,33 @@ impl Value {
         resolved_record: &ResolvedRecord
     ) -> Result<Self, Error> {
         let mut items = match self {
-            Value::Map(items) => Ok(items),
+            Value::Map(items) => Ok(items.into_iter().map(|(key, value)|{(key.into(), value)}).collect()),
             Value::Record(fields) => Ok(fields.into_iter().collect::<HashMap<_, _>>()),
             other => Err(Error::new(Details::GetRecord {
-                expected: resolved_record.fields
-                    .iter()
-                    .map(|field| (field.name.clone(),
-                                SchemaKind::from(&field.resolve_field()))
+                expected: resolved_record.fields()
+                    .map(|field| (field.name().to_string(),
+                                SchemaKind::from(&field.schema()))
                             )
                     .collect(),
                 other,
             })),
         }?;
 
-        let new_fields = resolved_record.fields
-            .iter()
+        let new_fields = resolved_record.fields()
             .map(|field| {
-                let value = match items.remove(field.name) {
+                let value = match items.remove(field.name()) {
                     Some(value) => value,
-                    None => match &field.default {
+                    None => match field.default(){
                         Some(value) => value.clone(), // we have already checked that the defualt
                                                       // agrees with the schema
                         None => {
-                            return Err(Details::GetField(field.name.clone()).into());
+                            return Err(Details::GetField(field.name().to_string()).into());
                         }
                     },
                 };
                 value
-                    .resolve_internal(field.resolve_field())
-                    .map(|value| (field.name.clone(), value))
+                    .resolve_internal(field.schema())
+                    .map(|value| (Arc::clone(field.name()), value))
             })
             .collect::<Result<Vec<_>, _>>()?;
 
@@ -1327,7 +1325,7 @@ mod tests {
                 r#"Invalid value: Fixed(11, [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10]) for schema: Duration(FixedSchema { name: Name { name: "TestName", .. }, size: 12, .. }). Reason: The value's size ('11') must be exactly 12 to be a Duration"#,
             ),
             (
-                Value::Record(vec![("unknown_field_name".to_string(), Value::Null)]),
+                Value::Record(vec![("unknown_field_name".into(), Value::Null)]),
                 Schema::Record(RecordSchema {
                     name: Name::new("record_name")?.into(),
                     aliases: None,
@@ -1527,21 +1525,21 @@ mod tests {
 
         assert!(
             Value::Record(vec![
-                ("a".to_string(), Value::Long(42i64)),
-                ("b".to_string(), Value::String("foo".to_string())),
+                ("a".into(), Value::Long(42i64)),
+                ("b".into(), Value::String("foo".to_string())),
             ])
             .validate_against_resolved(&schema)
         );
 
         let value = Value::Record(vec![
-            ("b".to_string(), Value::String("foo".to_string())),
-            ("a".to_string(), Value::Long(42i64)),
+            ("b".into(), Value::String("foo".to_string())),
+            ("a".into(), Value::Long(42i64)),
         ]);
         assert!(value.validate_against_resolved(&schema));
 
         let value = Value::Record(vec![
-            ("a".to_string(), Value::Boolean(false)),
-            ("b".to_string(), Value::String("foo".to_string())),
+            ("a".into(), Value::Boolean(false)),
+            ("b".into(), Value::String("foo".to_string())),
         ]);
         assert!(!value.validate_against_resolved(&schema));
         assert_logged(
@@ -1553,8 +1551,8 @@ mod tests {
         );
 
         let value = Value::Record(vec![
-            ("a".to_string(), Value::Long(42i64)),
-            ("c".to_string(), Value::String("foo".to_string())),
+            ("a".into(), Value::Long(42i64)),
+            ("c".into(), Value::String("foo".to_string())),
         ]);
         assert!(!value.validate_against_resolved(&schema));
         assert_logged(
@@ -1569,8 +1567,8 @@ mod tests {
         );
 
         let value = Value::Record(vec![
-            ("a".to_string(), Value::Long(42i64)),
-            ("d".to_string(), Value::String("foo".to_string())),
+            ("a".into(), Value::Long(42i64)),
+            ("d".into(), Value::String("foo".to_string())),
         ]);
         assert!(!value.validate_against_resolved(&schema));
         assert_logged(
@@ -1582,10 +1580,10 @@ mod tests {
         );
 
         let value = Value::Record(vec![
-            ("a".to_string(), Value::Long(42i64)),
-            ("b".to_string(), Value::String("foo".to_string())),
-            ("c".to_string(), Value::Null),
-            ("d".to_string(), Value::Null),
+            ("a".into(), Value::Long(42i64)),
+            ("b".into(), Value::String("foo".to_string())),
+            ("c".into(), Value::Null),
+            ("d".into(), Value::Null),
         ]);
         assert!(!value.validate_against_resolved(&schema));
         assert_logged(
@@ -1632,8 +1630,8 @@ mod tests {
             Value::Union(
                 1,
                 Box::new(Value::Record(vec![
-                    ("a".to_string(), Value::Long(42i64)),
-                    ("b".to_string(), Value::String("foo".to_string())),
+                    ("a".into(), Value::Long(42i64)),
+                    ("b".into(), Value::String("foo".to_string())),
                 ]))
             )
             .validate_against_resolved(&union_schema)
@@ -1948,14 +1946,14 @@ mod tests {
         )?;
 
         let value = Value::Record(vec![(
-            "event".to_string(),
-            Value::Record(vec![("amount".to_string(), Value::Int(200))]),
+            "event".into(),
+            Value::Record(vec![("amount".into(), Value::Int(200))]),
         )]);
         assert!(value.resolve(&schema).is_ok());
 
         let value = Value::Record(vec![(
-            "event".to_string(),
-            Value::Record(vec![("size".to_string(), Value::Int(1))]),
+            "event".into(),
+            Value::Record(vec![("size".into(), Value::Int(1))]),
         )]);
         assert!(value.resolve(&schema).is_err());
 
@@ -2047,9 +2045,9 @@ mod tests {
         );
         assert_eq!(
             JsonValue::try_from(Value::Record(vec![
-                ("v1".to_string(), Value::Int(1)),
-                ("v2".to_string(), Value::Int(2)),
-                ("v3".to_string(), Value::Int(3))
+                ("v1".into(), Value::Int(1)),
+                ("v2".into(), Value::Int(2)),
+                ("v3".into(), Value::Int(3))
             ]))?,
             JsonValue::Object(
                 vec![

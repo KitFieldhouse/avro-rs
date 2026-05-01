@@ -26,6 +26,7 @@ use crate::{
     types::Value,
     util::{safe_len, zag_i32, zag_i64},
 };
+use std::sync::Arc;
 use std::{
     collections::HashMap,
     io::{ErrorKind, Read},
@@ -279,13 +280,8 @@ pub(crate) fn decode_internal<R: Read>(
         }
         ResolvedNode::Union(inner) => match zag_i64(reader).map_err(Error::into_details) {
             Ok(index) => {
-                let variants = inner.variants();
-                let variant = variants
-                    .get(usize::try_from(index).map_err(|e| Details::ConvertI64ToUsize(e, index))?)
-                    .ok_or(Details::GetUnionVariant {
-                        index,
-                        num_variants: variants.len(),
-                    })?;
+                let variant = inner
+                    .get_variant(usize::try_from(index).map_err(|e| Details::ConvertI64ToUsize(e, index))?)?;
                 let value = decode_internal(variant.clone(), reader)?;
                 Ok(Value::Union(index as u32, Box::new(value)))
             }
@@ -298,15 +294,15 @@ pub(crate) fn decode_internal<R: Read>(
             }
             Err(io_err) => Err(Error::new(io_err)),
         },
-        ResolvedNode::Record(ResolvedRecord {fields, .. }) => {
+        ResolvedNode::Record(resolved_record) => {
             // Benchmarks indicate ~10% improvement using this method.
-            let mut items = Vec::with_capacity(fields.len());
-            for field in fields {
+            let mut items = Vec::with_capacity(resolved_record.field_len());
+            for field in resolved_record.fields() {
                 // TODO: This clone is also expensive. See if we can do away with it...
                 items.push((
-                    field.name.clone(),
+                    Arc::clone(field.name()),
                     decode_internal(
-                        field.resolve_field(),
+                        field.schema(),
                         reader,
                     )?,
                 ));

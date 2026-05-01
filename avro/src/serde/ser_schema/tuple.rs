@@ -144,8 +144,7 @@ impl<'s, 'w, W: Write> SerializeTuple for ManyTupleSerializer<'s, 'w, W> {
     {
         let schema = self
             .schema
-            .fields
-            .get(self.field_position)
+            .get_field(self.field_position)
             .ok_or_else(|| Details::SerializeRecordUnknownFieldIndex {
                 position: self.field_position,
                 schema: ResolvedNode::Record(self.schema.clone())
@@ -163,10 +162,10 @@ impl<'s, 'w, W: Write> SerializeTuple for ManyTupleSerializer<'s, 'w, W> {
     }
 
     fn end(self) -> Result<Self::Ok, Self::Error> {
-        if self.field_position != self.schema.fields.len() {
+        if self.field_position != self.schema.field_len() {
             Err(Details::SerializeTupleMissingElements {
                 position: self.field_position,
-                total_elements: self.schema.fields.len(),
+                total_elements: self.schema.field_len(),
             }
             .into())
         } else {

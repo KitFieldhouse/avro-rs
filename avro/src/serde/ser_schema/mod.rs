@@ -317,7 +317,7 @@ impl<'s, 'w, W: Write> Serializer for SchemaAwareSerializer<'s, 'w, W> {
 
     fn serialize_none(self) -> Result<Self::Ok, Self::Error> {
         if let ResolvedNode::Union(ref union) = self.schema
-            && union.variants().len() == 2
+            && union.variants_len() == 2
             && let Some(null_index) = union.index_of_schema_kind(SchemaKind::Null)
         {
             zig_i32(null_index as i32, &mut *self.writer)
@@ -331,12 +331,12 @@ impl<'s, 'w, W: Write> Serializer for SchemaAwareSerializer<'s, 'w, W> {
         T: ?Sized + Serialize,
     {
         if let ResolvedNode::Union(ref union) = self.schema
-            && union.variants().len() == 2
+            && union.variants_len() == 2
             && let Some(null_index) = union.index_of_schema_kind(SchemaKind::Null)
         {
             let some_index = (null_index + 1) & 1;
             let mut bytes_written = zig_i32(some_index as i32, &mut *self.writer)?;
-            let node = union.variants()[some_index].clone();
+            let node = union.get_variant(some_index).unwrap();
             bytes_written +=
                 value.serialize(self.with_different_schema(node)?)?;
             Ok(bytes_written)
@@ -357,7 +357,7 @@ impl<'s, 'w, W: Write> Serializer for SchemaAwareSerializer<'s, 'w, W> {
 
     fn serialize_unit_struct(self, name: &'static str) -> Result<Self::Ok, Self::Error> {
         match self.schema {
-            ResolvedNode::Record(record) if record.fields.is_empty() && record.name.name() == name => {
+            ResolvedNode::Record(record) if record.no_fields() && record.name().name() == name => {
                 Ok(0)
             }
             ResolvedNode::Union(union) => {
@@ -385,10 +385,10 @@ impl<'s, 'w, W: Write> Serializer for SchemaAwareSerializer<'s, 'w, W> {
                     Err(self.error("unit variant", format!(r#"Expected symbol "{variant}" at index {variant_index} in enum"#)))
                 }
             }
-            ResolvedNode::Union(ref union) => match union.variants()[variant_index as usize] {
+            ResolvedNode::Union(ref union) => match union.get_variant(variant_index as usize).unwrap() {
                 // Bare union
                 ResolvedNode::Null => zig_i32(variant_index as i32, &mut *self.writer),
-                ResolvedNode::Record(ref record) if record.fields.is_empty() && record.name.name() == variant => {
+                ResolvedNode::Record(ref record) if record.no_fields() && record.name().name() == variant => {
                     // Union of records
                     zig_i32(variant_index as i32, &mut *self.writer)
                 }
@@ -407,8 +407,8 @@ impl<'s, 'w, W: Write> Serializer for SchemaAwareSerializer<'s, 'w, W> {
         T: ?Sized + Serialize,
     {
         match self.schema {
-            ResolvedNode::Record(ref record) if record.fields.len() == 1 && record.name.name() == name => {
-                let schema = record.fields[0].resolve_field();
+            ResolvedNode::Record(ref record) if record.field_len() == 1 && record.name().name() == name => {
+                let schema = record.get_field(0).unwrap().schema();
                 value.serialize(self.with_different_schema(schema)?)
             }
             ResolvedNode::Union(union) => UnionSerializer::new(self.writer, union, self.config)
@@ -431,18 +431,18 @@ impl<'s, 'w, W: Write> Serializer for SchemaAwareSerializer<'s, 'w, W> {
         T: ?Sized + Serialize,
     {
         match self.schema {
-            ResolvedNode::Union(ref union) => match &union.variants()[variant_index as usize] {
+            ResolvedNode::Union(ref union) => match &union.get_variant(variant_index as usize).unwrap() {
                 ResolvedNode::Record(record)
-                    if record.fields.len() == 1
-                        && record.name.name() == variant
+                    if record.field_len() == 1
+                        && record.name().name() == variant
                         && record
-                            .attributes
+                            .attributes()
                             .get("org.apache.avro.rust.union_of_records")
                             == Some(&Bool(true)) =>
                 {
                     // Union of records
                     let mut bytes_written = zig_i32(variant_index as i32, &mut *self.writer)?;
-                    let schema = record.fields[0].resolve_field();
+                    let schema = record.get_field(0).unwrap().schema();
                     bytes_written += value.serialize(self.with_different_schema(schema)?)?;
                     Ok(bytes_written)
                 }
@@ -479,7 +479,7 @@ impl<'s, 'w, W: Write> Serializer for SchemaAwareSerializer<'s, 'w, W> {
             // The derived Serialize implementations use `serialize_unit` instead
             ResolvedNode::Null if len == 0 => Ok(TupleSerializer::unit(None)),
             schema if len == 1 => Ok(TupleSerializer::one(self.writer, schema, self.config, None)),
-            ResolvedNode::Record(record) if record.fields.len() == len => Ok(TupleSerializer::many(
+            ResolvedNode::Record(record) if record.field_len() == len => Ok(TupleSerializer::many(
                 self.writer,
                 record,
                 self.config,
@@ -499,7 +499,7 @@ impl<'s, 'w, W: Write> Serializer for SchemaAwareSerializer<'s, 'w, W> {
         len: usize,
     ) -> Result<Self::SerializeTupleStruct, Self::Error> {
         match self.schema {
-            ResolvedNode::Record(record) if record.fields.len() == len && record.name.name() == name => {
+            ResolvedNode::Record(record) if record.field_len() == len && record.name().name() == name => {
                 Ok(ManyTupleSerializer::new(
                     self.writer,
                     record,
@@ -524,9 +524,9 @@ impl<'s, 'w, W: Write> Serializer for SchemaAwareSerializer<'s, 'w, W> {
         len: usize,
     ) -> Result<Self::SerializeTupleVariant, Self::Error> {
         if let ResolvedNode::Union(ref union) = self.schema
-            && let ResolvedNode::Record(record) = &union.variants()[variant_index as usize]
-            && record.fields.len() == len
-            && record.name.name() == variant
+            && let ResolvedNode::Record(record) = &union.get_variant(variant_index as usize).unwrap()
+            && record.field_len() == len
+            && record.name().name() == variant
         {
             let bytes_written = zig_i32(variant_index as i32, &mut *self.writer)?;
             Ok(ManyTupleSerializer::new(
@@ -598,9 +598,9 @@ impl<'s, 'w, W: Write> Serializer for SchemaAwareSerializer<'s, 'w, W> {
         len: usize,
     ) -> Result<Self::SerializeStructVariant, Self::Error> {
         if let ResolvedNode::Union(ref union) = self.schema
-            && let ResolvedNode::Record(record) = &union.variants()[variant_index as usize]
-            && record.fields.len() == len
-            && record.name.name() == variant
+            && let ResolvedNode::Record(record) = &union.get_variant(variant_index as usize).unwrap()
+            && record.field_len() == len
+            && record.name().name() == variant
         {
             let bytes_written = zig_i32(variant_index as i32, &mut *self.writer)?;
             Ok(RecordSerializer::new(

@@ -3163,9 +3163,9 @@ mod tests {
         match deser_value {
             types::Value::Record(fields) => {
                 assert_eq!(fields.len(), 2);
-                assert_eq!(fields[0].0, "barInit");
+                assert_eq!(fields[0].0.as_ref(), "barInit");
                 assert_eq!(fields[0].1, types::Value::Enum(0, "bar0".to_string()));
-                assert_eq!(fields[1].0, "barUse");
+                assert_eq!(fields[1].0.as_ref(), "barUse");
                 assert_eq!(fields[1].1, types::Value::Enum(1, "bar1".to_string()));
             }
             _ => panic!("Expected Value::Record"),

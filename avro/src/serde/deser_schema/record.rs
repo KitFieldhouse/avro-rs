@@ -50,12 +50,12 @@ impl<'de, 's, 'r, R: Read> MapAccess<'de> for RecordDeserializer<'s, 'r, R> {
     where
         K: DeserializeSeed<'de>,
     {
-        if self.current_field >= self.schema.fields.len() {
+        if self.current_field >= self.schema.field_len() {
             // Finished reading this record
             Ok(None)
         } else {
             seed.deserialize(IdentifierDeserializer::string(
-                &self.schema.fields[self.current_field].name,
+                self.schema.get_field(self.current_field).unwrap().name(),
             ))
             .map(Some)
         }
@@ -65,17 +65,17 @@ impl<'de, 's, 'r, R: Read> MapAccess<'de> for RecordDeserializer<'s, 'r, R> {
     where
         V: DeserializeSeed<'de>,
     {
-        let schema = &self.schema.fields[self.current_field].resolve_field();
+        let schema = &self.schema.get_field(self.current_field).unwrap().schema();
         let value = if let ResolvedNode::Record(record) = schema
-            && record.fields.len() == 1
+            && record.field_len() == 1
             && record
-                .attributes
+                .attributes()
                 .get("org.apache.avro.rust.union_of_records")
                 == Some(&serde_json::Value::Bool(true))
         {
             seed.deserialize(SchemaAwareDeserializer::new(
                 self.reader,
-                record.fields[0].resolve_field(),
+                record.get_field(0).unwrap().schema(),
                 self.config,
             ))?
         } else {
@@ -90,6 +90,6 @@ impl<'de, 's, 'r, R: Read> MapAccess<'de> for RecordDeserializer<'s, 'r, R> {
     }
 
     fn size_hint(&self) -> Option<usize> {
-        Some(self.schema.fields.len() - self.current_field)
+        Some(self.schema.field_len() - self.current_field)
     }
 }

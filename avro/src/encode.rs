@@ -83,7 +83,7 @@ pub(crate) fn encode_internal<W: Write>(
     match value {
         Value::Null => {
             if let ResolvedNode::Union(union) = node {
-                match union.variants().iter().position(|sch| SchemaKind::from(sch) == SchemaKind::Null) {
+                match union.index_of_schema_kind(SchemaKind::Null) {
                     None => Err(Details::EncodeValueAsSchemaError {
                         value_kind: ValueKind::Null,
                         supported_schema: vec![SchemaKind::Null, SchemaKind::Union],
@@ -218,9 +218,8 @@ pub(crate) fn encode_internal<W: Write>(
         Value::Enum(i, _) => encode_int(*i as i32, writer),
         Value::Union(idx, item) => {
             if let ResolvedNode::Union(inner) = node {
-                let resolved = inner.variants();
-                let inner_schema = resolved
-                    .get(*idx as usize)
+                let inner_schema = inner
+                    .get_variant(*idx as usize)
                     .expect("Invalid Union validation occurred");
                 encode_long(*idx as i64, &mut *writer)?;
                 encode_internal(item, inner_schema.clone(), &mut *writer)
@@ -283,10 +282,7 @@ pub(crate) fn encode_internal<W: Write>(
             }
         }
         Value::Record(value_fields) => {
-            if let ResolvedNode::Record(ResolvedRecord {
-                fields: schema_fields,
-                ..
-            }) = node
+            if let ResolvedNode::Record(resolved_record) = node
             {
                 let mut lookup = HashMap::new();
                 value_fields.iter().for_each(|(name, field)| {
@@ -294,24 +290,25 @@ pub(crate) fn encode_internal<W: Write>(
                 });
 
                 let mut written_bytes = 0;
-                for schema_field in schema_fields.iter() {
-                    let name = schema_field.name;
+                for schema_field in resolved_record.fields() {
+                    let name = schema_field.name();
                     let value_opt = lookup.get(name).or_else(|| {
                         schema_field
-                            .aliases
+                            .aliases()
                             .iter()
-                            .find_map(|alias| lookup.get(alias))
+                            .find_map(|alias| lookup.get(alias.as_str())) // KTODO: need to look at
+                                                                          // this
                     });
 
                     if let Some(value) = value_opt {
                         written_bytes += encode_internal(
                             value,
-                            schema_field.resolve_field(),
+                            schema_field.schema(),
                             writer,
                         )?;
                     } else {
                         return Err(Details::NoEntryInLookupTable(
-                            name.clone(),
+                            name.to_string(),
                             format!("{lookup:?}"),
                         )
                         .into());
@@ -320,7 +317,7 @@ pub(crate) fn encode_internal<W: Write>(
                 Ok(written_bytes)
             } else if let ResolvedNode::Union(resolved_union) = node {
                 let mut union_buffer: Vec<u8> = Vec::new();
-                for (index, schema) in resolved_union.variants().iter().enumerate() {
+                for (index, schema) in resolved_union.variants().enumerate() {
                     encode_long(index as i64, &mut union_buffer)?;
                     let encode_res = encode_internal(
                         value,

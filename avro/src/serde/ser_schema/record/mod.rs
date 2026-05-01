@@ -64,7 +64,7 @@ impl<'s, 'w, W: Write> RecordSerializer<'s, 'w, W> {
     }
 
     fn field_error(&self, position: usize, error: Error) -> Error {
-        let field = &self.record.fields[position];
+        let field = self.record.get_field(position).unwrap();
         let error = match error.into_details() {
             Details::SerializeValueWithSchema {
                 value_type,
@@ -88,7 +88,7 @@ impl<'s, 'w, W: Write> RecordSerializer<'s, 'w, W> {
             details => format!("{details:?}"),
         };
         Error::new(Details::SerializeRecordFieldWithSchema {
-            field_name: field.name.clone(),
+            field_name: field.name().to_string(),
             record_schema: self.record.unravel(),
             error,
         })
@@ -99,14 +99,14 @@ impl<'s, 'w, W: Write> RecordSerializer<'s, 'w, W> {
         position: usize,
         value: &T,
     ) -> Result<(), Error> {
-        let field = &self.record.fields[position];
+        let field = self.record.get_field(position).unwrap();
         match self.field_position.cmp(&position) {
             Ordering::Equal => {
                 // Field received in the right order
                 self.bytes_written += value
                     .serialize(SchemaAwareSerializer::new(
                         self.writer,
-                        field.resolve_field(),
+                        field.schema(),
                         self.config,
                     )?)
                     .map_err(|e| self.field_error(self.field_position, e))?;
@@ -127,26 +127,26 @@ impl<'s, 'w, W: Write> RecordSerializer<'s, 'w, W> {
                 value
                     .serialize(SchemaAwareSerializer::new(
                         &mut bytes,
-                        field.resolve_field(),
+                        field.schema(),
                         self.config,
                     )?)
                     .map_err(|e| self.field_error(position, e))?;
                 if self.cache.insert(position, bytes).is_some() {
-                    Err(Details::FieldNameDuplicate(field.name.clone()).into())
+                    Err(Details::FieldNameDuplicate(field.name().to_string()).into())
                 } else {
                     Ok(())
                 }
             }
             Ordering::Greater => {
                 // This field is already written to the writer so we got a duplicate
-                Err(Details::FieldNameDuplicate(field.name.clone()).into())
+                Err(Details::FieldNameDuplicate(field.name().to_string()).into())
             }
         }
     }
 
     fn serialize_default(&mut self, position: usize) -> Result<(), Error> {
-        let field = self.record.fields[position].clone();
-        if let Some(default) = &field.default {
+        let field = self.record.get_field(position).unwrap();
+        if let Some(default) = field.default() {
             self.serialize_next_field(
                 position,
                 &AvroValueSerialize::new(default),
@@ -154,7 +154,7 @@ impl<'s, 'w, W: Write> RecordSerializer<'s, 'w, W> {
             .map_err(|e| self.field_error(position, e))
         } else {
             Err(Details::MissingDefaultForSkippedField {
-                field_name: field.name.clone(),
+                field_name: field.name().to_string(),
                 schema: self.record.unravel(),
             }
             .into())
@@ -163,7 +163,7 @@ impl<'s, 'w, W: Write> RecordSerializer<'s, 'w, W> {
 
     fn end(mut self) -> Result<usize, Error> {
         // Write any fields that were skipped by `#[serde(skip)]` or `#[serde(skip_serializing{,_if}]`
-        while self.field_position != self.record.fields.len() {
+        while self.field_position != self.record.field_len() {
             self.serialize_default(self.field_position)?;
         }
 
@@ -179,7 +179,7 @@ impl<'s, 'w, W: Write> SerializeStruct for RecordSerializer<'s, 'w, W> {
     where
         T: ?Sized + Serialize,
     {
-        if let Some(position) = self.record.lookup.get(key).copied() {
+        if let Some(position) = self.record.lookup().get(key).copied() {
             self.serialize_next_field(position, value)
         } else {
             Err(Details::GetField(key.to_string()).into())
@@ -187,7 +187,7 @@ impl<'s, 'w, W: Write> SerializeStruct for RecordSerializer<'s, 'w, W> {
     }
 
     fn skip_field(&mut self, key: &'static str) -> Result<(), Self::Error> {
-        if let Some(position) = self.record.lookup.get(key).copied() {
+        if let Some(position) = self.record.lookup().get(key).copied() {
             self.serialize_default(position)
         } else {
             Err(Details::GetField(key.to_string()).into())
@@ -208,7 +208,7 @@ impl<'s, 'w, W: Write> SerializeMap for RecordSerializer<'s, 'w, W> {
         T: ?Sized + Serialize,
     {
         let name = key.serialize(StringSerializer)?;
-        if let Some(position) = self.record.lookup.get(&name).copied() {
+        if let Some(position) = self.record.lookup().get(name.as_str()).copied() {
             self.map_position = Some(position);
             Ok(())
         } else {
@@ -237,7 +237,7 @@ impl<'s, 'w, W: Write> SerializeMap for RecordSerializer<'s, 'w, W> {
         V: ?Sized + Serialize,
     {
         let name = key.serialize(StringSerializer)?;
-        if let Some(position) = self.record.lookup.get(&name).copied() {
+        if let Some(position) = self.record.lookup().get(name.as_str()).copied() {
             self.serialize_next_field(position, value)
         } else {
             Err(Details::FieldName(name.to_string()).into())

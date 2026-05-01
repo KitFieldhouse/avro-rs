@@ -708,6 +708,10 @@ impl<'a> ResolvedRecord<'a>{
         self.record_schema.fields.len()
     }
 
+    pub fn no_fields(&self) -> bool{
+        self.record_schema.fields.is_empty()
+    }
+
 }
 
 impl<'a> ResolvedMap<'a>{

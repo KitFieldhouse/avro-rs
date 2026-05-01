@@ -335,7 +335,7 @@ impl<'s, 'w, W: Write> Serializer for UnionSerializer<'s, 'w, W> {
 
     fn serialize_unit_struct(self, name: &'static str) -> Result<Self::Ok, Self::Error> {
         match self.union.find_named_schema(name) {
-            Some((index, ResolvedNode::Record(record))) if record.fields.is_empty() => {
+            Some((index, ResolvedNode::Record(record))) if record.no_fields() => {
                 zig_i32(index as i32, &mut *self.writer)
             }
             _ => Err(self.error(
@@ -363,11 +363,11 @@ impl<'s, 'w, W: Write> Serializer for UnionSerializer<'s, 'w, W> {
         T: ?Sized + Serialize,
     {
         match self.union.find_named_schema(name) {
-            Some((index, ResolvedNode::Record(record))) if record.fields.len() == 1 => {
+            Some((index, ResolvedNode::Record(record))) if record.field_len() == 1 => {
                 let mut bytes_written = zig_i32(index as i32, &mut *self.writer)?;
                 bytes_written += value.serialize(SchemaAwareSerializer::new(
                     self.writer,
-                    record.fields[0].resolve_field(),
+                    record.get_field(0).unwrap().schema(),
                     self.config,
                 )?)?;
                 Ok(bytes_written)
@@ -394,7 +394,7 @@ impl<'s, 'w, W: Write> Serializer for UnionSerializer<'s, 'w, W> {
 
     fn serialize_seq(self, len: Option<usize>) -> Result<Self::SerializeSeq, Self::Error> {
         if let Some(index) = self.union.index_of_schema_kind(SchemaKind::Array)
-            && let ResolvedNode::Array(array) = &self.union.variants()[index]
+            && let ResolvedNode::Array(array) = &self.union.get_variant(index).unwrap()
         {
             let bytes_written = zig_i32(index as i32, &mut *self.writer)?;
             BlockSerializer::array(self.writer, array.clone(), self.config, len, Some(bytes_written))
@@ -444,7 +444,7 @@ impl<'s, 'w, W: Write> Serializer for UnionSerializer<'s, 'w, W> {
         len: usize,
     ) -> Result<Self::SerializeTupleStruct, Self::Error> {
         match self.union.find_named_schema(name) {
-            Some((index, ResolvedNode::Record(record))) if record.fields.len() == len => {
+            Some((index, ResolvedNode::Record(record))) if record.field_len() == len => {
                 let bytes_written = zig_i32(index as i32, &mut *self.writer)?;
                 Ok(ManyTupleSerializer::new(
                     self.writer,
@@ -472,7 +472,7 @@ impl<'s, 'w, W: Write> Serializer for UnionSerializer<'s, 'w, W> {
 
     fn serialize_map(self, len: Option<usize>) -> Result<Self::SerializeMap, Self::Error> {
         let map_index = self.union.index_of_schema_kind(SchemaKind::Map).map(|i| {
-            if let ResolvedNode::Map(map) = &self.union.variants()[i] {
+            if let ResolvedNode::Map(map) = &self.union.get_variant(i).unwrap() {
                 (i, map.clone())
             } else {
                 unreachable!("SchemaKind is Map so Schema must also be a Map")
