@@ -33,7 +33,7 @@ use std::{collections::{HashMap, HashSet}, sync::Arc};
 #[derive(Debug,Clone)]
 pub struct ResolvedContext{
     definitions: NameMap,
-    default_fields: HashMap<(Arc<Name>, Arc<String>), Arc<types::Value>>
+    default_fields: HashMap<(Arc<Name>, Arc<str>), Arc<types::Value>>
 }
 
 impl ResolvedContext{
@@ -200,9 +200,7 @@ impl ResolvedContext{
                             .as_ref()
                             .fullname(None)
                             .to_string(),
-                        field_name: default.defualt_id.1
-                            .as_ref()
-                            .clone(),
+                        field_name: default.defualt_id.1.to_string(),
                         value: default.json.clone() ,
                         schema: default.schema
                             .as_ref()
@@ -678,7 +676,7 @@ impl<'a> ResolvedRecord<'a>{
     }
 
 
-    pub fn lookup(&self) -> &'a BTreeMap<String, usize>{
+    pub fn lookup(&self) -> &'a BTreeMap<Arc<str>, usize>{
         &self.record_schema.lookup
     }
 
@@ -706,6 +704,10 @@ impl<'a> ResolvedRecord<'a>{
         })
     }
 
+    pub fn field_len(&self) -> usize{
+        self.record_schema.fields.len()
+    }
+
 }
 
 impl<'a> ResolvedMap<'a>{
@@ -727,6 +729,9 @@ impl<'a> ResolvedUnion<'a>{
         })
     }
 
+    pub fn variants_len(&self) -> usize{
+        self.union_schema.schemas.len()
+    }
 
     /// Get variant at given index.
     pub fn get_variant(&self, index: usize)->AvroResult<ResolvedNode<'a>>{
@@ -849,6 +854,10 @@ impl<'a> ResolvedRecordField<'a>{
 
     pub fn is_nullable(&self) -> bool {
         self.field.is_nullable()
+    }
+
+    pub fn name(&self) -> &Arc<str>{
+        &self.field.name
     }
 
     pub fn doc(&self)->&'a Documentation{
@@ -1445,13 +1454,13 @@ mod tests {
         let node = ResolvedNode::new(&rs);
         match node {
             ResolvedNode::Record(record) => {
-                assert_eq!(record.fields.len(), 1);
-                let inner_node = record.fields[0].resolve_field();
+                assert_eq!(record.field_len(), 1);
+                let inner_node = record.get_field(0).unwrap().schema();
                 match inner_node {
                     ResolvedNode::Record(inner_record) => {
-                        assert_eq!(inner_record.fields.len(), 2);
-                        assert_eq!(inner_record.fields[0].name, "x");
-                        assert_eq!(inner_record.fields[1].name, "y");
+                        assert_eq!(inner_record.field_len(), 2);
+                        assert_eq!(inner_record.get_field(0).unwrap().name().as_ref(), "x");
+                        assert_eq!(inner_record.get_field(1).unwrap().name().as_ref(), "y");
                     },
                     other => panic!("expected Record for inner, got {other}"),
                 }
@@ -1490,13 +1499,12 @@ mod tests {
         let node = ResolvedNode::new(&rs);
         match node {
             ResolvedNode::Record(rec) => {
-                let field_node = rec.fields[0].resolve_field();
+                let field_node = rec.get_field(0).unwrap().schema();
                 match field_node {
                     ResolvedNode::Union(union) => {
-                        let variants = union.variants();
-                        assert_eq!(variants.len(), 2);
-                        assert!(matches!(variants[0], ResolvedNode::Null));
-                        assert!(matches!(variants[1], ResolvedNode::Record(_)));
+                        assert_eq!(union.variants_len(), 2);
+                        assert!(matches!(union.get_variant(0).unwrap(), ResolvedNode::Null));
+                        assert!(matches!(union.get_variant(1).unwrap(), ResolvedNode::Record(_)));
                     },
                     other => panic!("expected Union, got {other}"),
                 }
@@ -1534,7 +1542,7 @@ mod tests {
         let node = ResolvedNode::new(&rs);
         match node {
             ResolvedNode::Record(rec) => {
-                let field_node = rec.fields[0].resolve_field();
+                let field_node = rec.get_field(0).unwrap().schema();
                 match field_node {
                     ResolvedNode::Array(arr) => {
                         let items_node = arr.items();
@@ -1576,7 +1584,7 @@ mod tests {
         let node = ResolvedNode::new(&rs);
         match node {
             ResolvedNode::Record(rec) => {
-                let field_node = rec.fields[0].resolve_field();
+                let field_node = rec.get_field(0).unwrap().schema();
                 match field_node {
                     ResolvedNode::Map(map) => {
                         let values_node = map.types();
@@ -1719,10 +1727,10 @@ mod tests {
         // Walk all the way down
         let node = ResolvedNode::new(&rs);
         let ResolvedNode::Record(a) = node else { panic!("expected Record") };
-        let ResolvedNode::Record(b) = a.fields[0].resolve_field() else { panic!("expected Record") };
-        let ResolvedNode::Record(c) = b.fields[0].resolve_field() else { panic!("expected Record") };
-        let ResolvedNode::Record(d) = c.fields[0].resolve_field() else { panic!("expected Record") };
-        let val = d.fields[0].resolve_field();
+        let ResolvedNode::Record(b) = a.get_field(0).unwrap().schema() else { panic!("expected Record") };
+        let ResolvedNode::Record(c) = b.get_field(0).unwrap().schema() else { panic!("expected Record") };
+        let ResolvedNode::Record(d) = c.get_field(0).unwrap().schema() else { panic!("expected Record") };
+        let val = d.get_field(0).unwrap().schema();
         assert!(matches!(val, ResolvedNode::Int));
 
         Ok(())
@@ -1756,7 +1764,7 @@ mod tests {
 
         // Verify the field resolves to an Enum
         let ResolvedNode::Record(rec) = ResolvedNode::new(&rs) else { panic!("expected Record") };
-        assert!(matches!(rec.fields[0].resolve_field(), ResolvedNode::Enum(_)));
+        assert!(matches!(rec.get_field(0).unwrap().schema(), ResolvedNode::Enum(_)));
 
         Ok(())
     }
@@ -2684,8 +2692,8 @@ mod tests {
         )?);
 
         let mut lookup = BTreeMap::new();
-        lookup.insert("value".to_owned(), 0);
-        lookup.insert("next".to_owned(), 1);
+        lookup.insert("value".into(), 0);
+        lookup.insert("next".into(), 1);
 
         let expected = Schema::Record(RecordSchema {
             name: Name::new("LongList")?.into(),
@@ -2766,14 +2774,14 @@ mod tests {
 
         let matching_inner1 = match node1 {
             ResolvedNode::Record(resolved_record) => {
-                Some(resolved_record.fields.iter().find(|field| field.name == "matchingInner").unwrap().resolve_field())
+                Some(resolved_record.fields().find(|field| field.name().as_ref() == "matchingInner").unwrap().schema())
             }
             _ => None
         };
 
         let matching_inner2 = match node2 {
             ResolvedNode::Record(resolved_record) => {
-                Some(resolved_record.fields.iter().find(|field| field.name == "matchingInner").unwrap().resolve_field())
+                Some(resolved_record.fields().find(|field| field.name().as_ref() == "matchingInner").unwrap().schema())
             }
             _ => None
         };
