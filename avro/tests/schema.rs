@@ -380,7 +380,7 @@ fn test_parse_reused_record_schema_by_fullname() -> TestResult {
                 custom_attributes: _,
             } = fields.get(2).unwrap();
 
-            assert_eq!(name, "min_temp");
+            assert_eq!(name.as_ref(), "min_temp");
 
             match schema {
                 Schema::Ref { name } => {
@@ -1030,7 +1030,7 @@ fn test_avro_3847_union_field_with_default_value_of_ref() -> TestResult {
     let writer_schema = Schema::parse_str(writer_schema_str)?;
     let mut writer = Writer::new(&writer_schema, Vec::new())?;
     let mut record = Record::new(writer.schema()).ok_or("Expected Some(Record), but got None")?;
-    record.put("f1", Value::Record(vec![("f1_1".to_string(), 10.into())]));
+    record.put("f1", Value::Record(vec![("f1_1".into(), 10.into())]));
     writer.append_value(record)?;
 
     let reader_schema_str = r#"
@@ -1071,14 +1071,14 @@ fn test_avro_3847_union_field_with_default_value_of_ref() -> TestResult {
 
     let expected = Value::Record(vec![
         (
-            "f1".to_string(),
-            Value::Record(vec![("f1_1".to_string(), 10.into())]),
+            "f1".into(),
+            Value::Record(vec![("f1_1".into(), 10.into())]),
         ),
         (
-            "f2".to_string(),
+            "f2".into(),
             Value::Union(
                 0,
-                Box::new(Value::Record(vec![("f1_1".to_string(), 100.into())])),
+                Box::new(Value::Record(vec![("f1_1".into(), 100.into())])),
             ),
         ),
     ]);
@@ -1138,9 +1138,9 @@ fn test_avro_3847_union_field_with_default_value_of_ref() -> TestResult {
     assert_eq!(1, result.len());
 
     let expected = Value::Record(vec![
-        ("f1".to_string(), Value::Enum(1, "b".to_string())),
+        ("f1".into(), Value::Enum(1, "b".to_string())),
         (
-            "f2".to_string(),
+            "f2".into(),
             Value::Union(0, Box::new(Value::Enum(0, "a".to_string()))),
         ),
     ]);
@@ -1200,9 +1200,9 @@ fn test_avro_3847_union_field_with_default_value_of_ref() -> TestResult {
     assert_eq!(1, result.len());
 
     let expected = Value::Record(vec![
-        ("f1".to_string(), Value::Fixed(3, vec![0, 1, 2])),
+        ("f1".into(), Value::Fixed(3, vec![0, 1, 2])),
         (
-            "f2".to_string(),
+            "f2".into(),
             Value::Union(0, Box::new(Value::Fixed(3, vec![b'a', b'b', b'c']))),
         ),
     ]);
@@ -1240,7 +1240,7 @@ fn test_avro_3847_union_field_with_default_value_of_ref_with_namespace() -> Test
     let writer_schema = Schema::parse_str(writer_schema_str)?;
     let mut writer = Writer::new(&writer_schema, Vec::new())?;
     let mut record = Record::new(writer.schema()).ok_or("Expected Some(Record), but got None")?;
-    record.put("f1", Value::Record(vec![("f1_1".to_string(), 10.into())]));
+    record.put("f1", Value::Record(vec![("f1_1".into(), 10.into())]));
     writer.append_value(record)?;
 
     let reader_schema_str = r#"
@@ -1282,14 +1282,14 @@ fn test_avro_3847_union_field_with_default_value_of_ref_with_namespace() -> Test
 
     let expected = Value::Record(vec![
         (
-            "f1".to_string(),
-            Value::Record(vec![("f1_1".to_string(), 10.into())]),
+            "f1".into(),
+            Value::Record(vec![("f1_1".into(), 10.into())]),
         ),
         (
-            "f2".to_string(),
+            "f2".into(),
             Value::Union(
                 0,
-                Box::new(Value::Record(vec![("f1_1".to_string(), 100.into())])),
+                Box::new(Value::Record(vec![("f1_1".into(), 100.into())])),
             ),
         ),
     ]);
@@ -1351,9 +1351,9 @@ fn test_avro_3847_union_field_with_default_value_of_ref_with_namespace() -> Test
     assert_eq!(1, result.len());
 
     let expected = Value::Record(vec![
-        ("f1".to_string(), Value::Enum(1, "b".to_string())),
+        ("f1".into(), Value::Enum(1, "b".to_string())),
         (
-            "f2".to_string(),
+            "f2".into(),
             Value::Union(0, Box::new(Value::Enum(0, "a".to_string()))),
         ),
     ]);
@@ -1415,9 +1415,9 @@ fn test_avro_3847_union_field_with_default_value_of_ref_with_namespace() -> Test
     assert_eq!(1, result.len());
 
     let expected = Value::Record(vec![
-        ("f1".to_string(), Value::Fixed(3, vec![0, 1, 2])),
+        ("f1".into(), Value::Fixed(3, vec![0, 1, 2])),
         (
-            "f2".to_string(),
+            "f2".into(),
             Value::Union(0, Box::new(Value::Fixed(3, vec![b'a', b'b', b'c']))),
         ),
     ]);
@@ -1455,7 +1455,7 @@ fn test_avro_3847_union_field_with_default_value_of_ref_with_enclosing_namespace
     let writer_schema = Schema::parse_str(writer_schema_str)?;
     let mut writer = Writer::new(&writer_schema, Vec::new())?;
     let mut record = Record::new(writer.schema()).ok_or("Expected Some(Record), but got None")?;
-    record.put("f1", Value::Record(vec![("f1_1".to_string(), 10.into())]));
+    record.put("f1", Value::Record(vec![("f1_1".into(), 10.into())]));
     writer.append_value(record)?;
 
     let reader_schema_str = r#"
@@ -1497,14 +1497,14 @@ fn test_avro_3847_union_field_with_default_value_of_ref_with_enclosing_namespace
 
     let expected = Value::Record(vec![
         (
-            "f1".to_string(),
-            Value::Record(vec![("f1_1".to_string(), 10.into())]),
+            "f1".into(),
+            Value::Record(vec![("f1_1".into(), 10.into())]),
         ),
         (
-            "f2".to_string(),
+            "f2".into(),
             Value::Union(
                 0,
-                Box::new(Value::Record(vec![("f1_1".to_string(), 100.into())])),
+                Box::new(Value::Record(vec![("f1_1".into(), 100.into())])),
             ),
         ),
     ]);
@@ -1566,9 +1566,9 @@ fn test_avro_3847_union_field_with_default_value_of_ref_with_enclosing_namespace
     assert_eq!(1, result.len());
 
     let expected = Value::Record(vec![
-        ("f1".to_string(), Value::Enum(1, "b".to_string())),
+        ("f1".into(), Value::Enum(1, "b".to_string())),
         (
-            "f2".to_string(),
+            "f2".into(),
             Value::Union(0, Box::new(Value::Enum(0, "a".to_string()))),
         ),
     ]);
@@ -1630,9 +1630,9 @@ fn test_avro_3847_union_field_with_default_value_of_ref_with_enclosing_namespace
     assert_eq!(1, result.len());
 
     let expected = Value::Record(vec![
-        ("f1".to_string(), Value::Fixed(3, vec![0, 1, 2])),
+        ("f1".into(), Value::Fixed(3, vec![0, 1, 2])),
         (
-            "f2".to_string(),
+            "f2".into(),
             Value::Union(0, Box::new(Value::Fixed(3, vec![b'a', b'b', b'c']))),
         ),
     ]);
@@ -1696,8 +1696,8 @@ fn test_avro_3851_read_default_value_for_simple_record_field() -> TestResult {
     assert_eq!(1, result.len());
 
     let expected = Value::Record(vec![
-        ("f1".to_string(), Value::Int(10)),
-        ("f2".to_string(), Value::Int(20)),
+        ("f1".into(), Value::Int(10)),
+        ("f2".into(), Value::Int(20)),
     ]);
 
     assert_eq!(expected, result[0]);
@@ -1745,10 +1745,10 @@ fn test_avro_3851_read_default_value_for_nested_record_field() -> TestResult {
     assert_eq!(1, result.len());
 
     let expected = Value::Record(vec![
-        ("f1".to_string(), Value::Int(10)),
+        ("f1".into(), Value::Int(10)),
         (
-            "f2".to_string(),
-            Value::Record(vec![("f1_1".to_string(), 100.into())]),
+            "f2".into(),
+            Value::Record(vec![("f1_1".into(), 100.into())]),
         ),
     ]);
 
@@ -1790,8 +1790,8 @@ fn test_avro_3851_read_default_value_for_enum_record_field() -> TestResult {
     assert_eq!(1, result.len());
 
     let expected = Value::Record(vec![
-        ("f1".to_string(), Value::Int(10)),
-        ("f2".to_string(), Value::Enum(0, "a".to_string())),
+        ("f1".into(), Value::Int(10)),
+        ("f2".into(), Value::Enum(0, "a".to_string())),
     ]);
 
     assert_eq!(expected, result[0]);
@@ -1832,8 +1832,8 @@ fn test_avro_3851_read_default_value_for_fixed_record_field() -> TestResult {
     assert_eq!(1, result.len());
 
     let expected = Value::Record(vec![
-        ("f1".to_string(), Value::Int(10)),
-        ("f2".to_string(), Value::Fixed(3, vec![b'a', b'b', b'c'])),
+        ("f1".into(), Value::Int(10)),
+        ("f2".into(), Value::Fixed(3, vec![b'a', b'b', b'c'])),
     ]);
 
     assert_eq!(expected, result[0]);
@@ -1873,9 +1873,9 @@ fn test_avro_3851_read_default_value_for_array_record_field() -> TestResult {
     assert_eq!(1, result.len());
 
     let expected = Value::Record(vec![
-        ("f1".to_string(), Value::Int(10)),
+        ("f1".into(), Value::Int(10)),
         (
-            "f2".to_string(),
+            "f2".into(),
             Value::Array(vec![1.into(), 2.into(), 3.into()]),
         ),
     ]);
@@ -1922,8 +1922,8 @@ fn test_avro_3851_read_default_value_for_map_record_field() -> TestResult {
         ("c".to_string(), "C".into()),
     ]);
     let expected = Value::Record(vec![
-        ("f1".to_string(), Value::Int(10)),
-        ("f2".to_string(), Value::Map(map)),
+        ("f1".into(), Value::Int(10)),
+        ("f2".into(), Value::Map(map)),
     ]);
 
     assert_eq!(expected, result[0]);
@@ -1958,7 +1958,7 @@ fn test_avro_3851_read_default_value_for_ref_record_field() -> TestResult {
     let writer_schema = Schema::parse_str(writer_schema_str)?;
     let mut writer = Writer::new(&writer_schema, Vec::new())?;
     let mut record = Record::new(writer.schema()).ok_or("Expected Some(Record), but got None")?;
-    record.put("f1", Value::Record(vec![("f1_1".to_string(), 10.into())]));
+    record.put("f1", Value::Record(vec![("f1_1".into(), 10.into())]));
     writer.append_value(record)?;
 
     let reader_schema_str = r#"
@@ -1998,12 +1998,12 @@ fn test_avro_3851_read_default_value_for_ref_record_field() -> TestResult {
 
     let expected = Value::Record(vec![
         (
-            "f1".to_string(),
-            Value::Record(vec![("f1_1".to_string(), 10.into())]),
+            "f1".into(),
+            Value::Record(vec![("f1_1".into(), 10.into())]),
         ),
         (
-            "f2".to_string(),
-            Value::Record(vec![("f1_1".to_string(), 100.into())]),
+            "f2".into(),
+            Value::Record(vec![("f1_1".into(), 100.into())]),
         ),
     ]);
 
