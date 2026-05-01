@@ -85,9 +85,13 @@ impl fmt::Display for SchemaFingerprint {
 
 #[derive(Debug)]
 pub struct DefaultToResolve{
-    field_name: String,
-    record_name: String,
-    schema: Schema,
+    /// Combination of fullname of record and field name that provides
+    /// a unique way to address this defualt.
+    defualt_id: (Arc<Name>, Arc<str>),
+    /// This is the [`Schema`] we will validate
+    /// against once we are in a complete context
+    schema: Arc<Schema>,
+    /// The provided JSON defualt value
     json: JsonValue
 }
 
@@ -369,14 +373,15 @@ impl From<Schema> for SchemaWithSymbols{
         fn transform(schema: Schema, defined_names: &mut HashMap<Arc<Name>, Arc<Schema>>, referenced_names: &mut HashSet<Arc<Name>>, field_defaults_to_resolve: &mut Vec<DefaultToResolve>) -> Schema {
             match schema {
                 Schema::Record(mut record_schema) => {
-                    let record_name = record_schema.name.fully_qualified_name(Option::None).to_string();
+                    let record_name = &record_schema.name;
                     for field in &mut record_schema.fields{
                         field.schema = transform(field.schema.clone(), defined_names, referenced_names, field_defaults_to_resolve);
                         if let Some(value) = &field.default{
-                            field_defaults_to_resolve.push(DefaultToResolve{record_name: record_name.clone(),
-                            field_name: field.name.clone(),
-                            schema: field.schema.clone(),
-                            json: value.clone()});
+                            field_defaults_to_resolve.push(DefaultToResolve{
+                                defualt_id: (Arc::clone(record_name), Arc::clone(&field.name)),
+                                schema: field.schema.clone().into(),
+                                json: value.clone()}
+                            );
                         }
                     };
                     let name = Arc::clone(&record_schema.name);
@@ -1498,7 +1503,7 @@ mod tests {
                     .schema(Schema::Float)
                     .build(),
             ],
-            lookup: BTreeMap::from_iter(vec![("field_one".to_string(), 0)]),
+            lookup: BTreeMap::from_iter(vec![("field_one".into(), 0)]),
             attributes: Default::default(),
         });
 
@@ -1512,7 +1517,7 @@ mod tests {
                     .schema(Schema::Float)
                     .build(),
             ],
-            lookup: BTreeMap::from_iter(vec![("field_one".to_string(), 0)]),
+            lookup: BTreeMap::from_iter(vec![("field_one".into(), 0)]),
             attributes: Default::default(),
         });
 
@@ -1666,7 +1671,7 @@ mod tests {
                     ])?))
                     .build(),
             ],
-            lookup: BTreeMap::from_iter(vec![("field_one".to_string(), 0)]),
+            lookup: BTreeMap::from_iter(vec![("field_one".into(), 0)]),
             attributes: Default::default(),
         });
 
@@ -1691,8 +1696,8 @@ mod tests {
         )?;
 
         let mut lookup = BTreeMap::new();
-        lookup.insert("a".to_owned(), 0);
-        lookup.insert("b".to_owned(), 1);
+        lookup.insert("a".into(), 0);
+        lookup.insert("b".into(), 1);
 
         let expected = Schema::Record(RecordSchema {
             name: Name::new("test")?.into(),
@@ -1741,11 +1746,11 @@ mod tests {
         )?;
 
         let mut lookup = BTreeMap::new();
-        lookup.insert("recordField".to_owned(), 0);
+        lookup.insert("recordField".into(), 0);
 
         let mut node_lookup = BTreeMap::new();
-        node_lookup.insert("children".to_owned(), 1);
-        node_lookup.insert("label".to_owned(), 0);
+        node_lookup.insert("children".into(), 1);
+        node_lookup.insert("label".into(), 0);
 
         let expected = Schema::Record(RecordSchema {
             name: Name::new("test")?.into(),
@@ -1911,8 +1916,8 @@ mod tests {
         )?;
 
         let mut lookup = BTreeMap::new();
-        lookup.insert("value".to_owned(), 0);
-        lookup.insert("next".to_owned(), 1);
+        lookup.insert("value".into(), 0);
+        lookup.insert("next".into(), 1);
 
         let expected = Schema::Record(RecordSchema {
             name: Name::new("LongList")?.into(),
@@ -1961,8 +1966,8 @@ mod tests {
         )?;
 
         let mut lookup = BTreeMap::new();
-        lookup.insert("value".to_owned(), 0);
-        lookup.insert("next".to_owned(), 1);
+        lookup.insert("value".into(), 0);
+        lookup.insert("next".into(), 1);
 
         let expected = Schema::Record(RecordSchema {
             name: Name::new("record")?.into(),
@@ -2015,8 +2020,8 @@ mod tests {
         )?;
 
         let mut lookup = BTreeMap::new();
-        lookup.insert("enum".to_owned(), 0);
-        lookup.insert("next".to_owned(), 1);
+        lookup.insert("enum".into(), 0);
+        lookup.insert("next".into(), 1);
 
         let expected = Schema::Record(RecordSchema {
             name: Name::new("record")?.into(),
@@ -2078,8 +2083,8 @@ mod tests {
         )?;
 
         let mut lookup = BTreeMap::new();
-        lookup.insert("fixed".to_owned(), 0);
-        lookup.insert("next".to_owned(), 1);
+        lookup.insert("fixed".into(), 0);
+        lookup.insert("next".into(), 1);
 
         let expected = Schema::Record(RecordSchema {
             name: Name::new("record")?.into(),
@@ -2636,7 +2641,7 @@ mod tests {
             assert_eq!(name, Name::new("AccountEvent")?.into());
 
             let field = &fields[0];
-            assert_eq!(&field.name, "NullableLongArray");
+            assert_eq!(field.name.as_ref(), "NullableLongArray");
 
             if let Schema::Union(ref union) = field.schema {
                 assert_eq!(union.schemas[0], Schema::Null);
@@ -2802,7 +2807,7 @@ mod tests {
                 assert_eq!(name, Name::new("Rec")?.into());
                 assert_eq!(fields.len(), 1);
                 let field = &fields[0];
-                assert_eq!(&field.name, "field_one");
+                assert_eq!(field.name.as_ref(), "field_one");
                 assert_eq!(field.custom_attributes, expected_custom_attributes());
             }
             _ => panic!("Expected Schema::Record"),
@@ -2832,7 +2837,7 @@ mod tests {
                 assert_eq!(name, Name::new("union_schema_test")?.into());
                 assert_eq!(fields.len(), 1);
                 let field = &fields[0];
-                assert_eq!(&field.name, "a");
+                assert_eq!(field.name.as_ref(), "a");
                 assert_eq!(&field.default, &Some(JsonValue::Null));
                 match &field.schema {
                     Schema::Union(union) => {
@@ -2871,7 +2876,7 @@ mod tests {
                 assert_eq!(name, Name::new("union_schema_test")?.into());
                 assert_eq!(fields.len(), 1);
                 let field = &fields[0];
-                assert_eq!(&field.name, "a");
+                assert_eq!(field.name.as_ref(), "a");
                 assert_eq!(&field.default, &Some(json!(123)));
                 match &field.schema {
                     Schema::Union(union) => {
@@ -2909,7 +2914,7 @@ mod tests {
                 assert_eq!(name, Name::new("union_schema_test")?.into());
                 assert_eq!(fields.len(), 1);
                 let field = &fields[0];
-                assert_eq!(&field.name, "a");
+                assert_eq!(field.name.as_ref(), "a");
                 assert_eq!(&field.default, &Some(json!(123)));
                 match &field.schema {
                     Schema::Union(union) => {
@@ -2948,7 +2953,7 @@ mod tests {
                 assert_eq!(name, Name::new("union_schema_test")?.into());
                 assert_eq!(fields.len(), 1);
                 let field = &fields[0];
-                assert_eq!(&field.name, "a");
+                assert_eq!(field.name.as_ref(), "a");
                 assert_eq!(&field.default, &Some(json!(123)));
                 match &field.schema {
                     Schema::Union(union) => {
@@ -2984,7 +2989,7 @@ mod tests {
         let schema = Schema::parse_str(schema)?;
         if let Schema::Record(RecordSchema { fields, .. }) = schema {
             let num_field = &fields[0];
-            assert_eq!(num_field.name, "num");
+            assert_eq!(num_field.name.as_ref(), "num");
             assert_eq!(
                 num_field.aliases,
                 vec!["num1".to_string(), "num2".to_string()]
@@ -4625,7 +4630,7 @@ mod tests {
     fn avro_3920_serialize_record_with_custom_attributes() -> TestResult {
         let expected = {
             let mut lookup = BTreeMap::new();
-            lookup.insert("value".to_owned(), 0);
+            lookup.insert("value".into(), 0);
             Schema::Record(RecordSchema {
                 name: Name::new("LongList")?.into(),
                 aliases: Some(vec![Alias::new("LinkedLongs").unwrap()]),
@@ -4766,7 +4771,7 @@ mod tests {
             Schema::Record(record_schema) => {
                 assert_eq!(record_schema.fields.len(), 1);
                 let field = record_schema.fields.first().unwrap();
-                assert_eq!(field.name, "birthday");
+                assert_eq!(field.name.as_ref(), "birthday");
                 assert_eq!(field.schema, Schema::Date);
                 assert_eq!(
                     types::Value::try_from(field.default.clone().unwrap())?,

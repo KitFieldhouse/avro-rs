@@ -47,7 +47,7 @@ impl<'s, 'w, W: Write> BlockSerializer<'s, 'w, W> {
         len: Option<usize>,
         bytes_written: Option<usize>,
     ) -> Result<Self, Error> {
-        Self::new(writer, schema.resolve_items(), config, len, bytes_written)
+        Self::new(writer, schema.items(), config, len, bytes_written)
     }
 
     pub fn map(
@@ -57,7 +57,7 @@ impl<'s, 'w, W: Write> BlockSerializer<'s, 'w, W> {
         len: Option<usize>,
         bytes_written: Option<usize>,
     ) -> Result<Self, Error> {
-        Self::new(writer, schema.resolve_types(), config, len, bytes_written)
+        Self::new(writer, schema.types(), config, len, bytes_written)
     }
 
     fn new(

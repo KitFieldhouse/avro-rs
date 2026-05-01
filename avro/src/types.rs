@@ -546,7 +546,7 @@ impl Value {
                 }),
             // (&Value::Union(None), &Schema::Union(_)) => None,
             (&Value::Union(i, ref value), ResolvedNode::Union(inner)) => inner
-                .resolve_schemas()
+                .variants()
                 .get(i as usize)
                 .map(|node| value.validate_internal(node.clone()))
                 .unwrap_or_else(|| Some(format!("No schema in the union at position '{i}'"))),
@@ -559,14 +559,14 @@ impl Value {
             (Value::Array(items), ResolvedNode::Array(inner)) => items.iter().fold(None, |acc, item| {
                 Value::accumulate(
                     acc,
-                    item.validate_internal(inner.resolve_items()),
+                    item.validate_internal(inner.items()),
                 )
             }),
             (Value::Map(items), ResolvedNode::Map(inner)) => {
                 items.iter().fold(None, |acc, (_, value)| {
                     Value::accumulate(
                         acc,
-                        value.validate_internal(inner.resolve_types()),
+                        value.validate_internal(inner.types()),
                     )
                 })
             }
@@ -1069,7 +1069,7 @@ impl Value {
         self,
         resolved_array: ResolvedArray,
     ) -> Result<Self, Error> {
-        let items_resolved = resolved_array.resolve_items();
+        let items_resolved = resolved_array.items();
         match self {
             Value::Array(items) => Ok(Value::Array(
                 items
@@ -1089,7 +1089,7 @@ impl Value {
         self,
         resolved_map: ResolvedMap,
     ) -> Result<Self, Error> {
-        let resolved_types = resolved_map.resolve_types();
+        let resolved_types = resolved_map.types();
         match self {
             Value::Map(items) => Ok(Value::Map(
                 items

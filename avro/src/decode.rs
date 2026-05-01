@@ -245,7 +245,7 @@ pub(crate) fn decode_internal<R: Read>(
                 items.reserve(len);
                 for _ in 0..len {
                     items.push(decode_internal(
-                        inner.resolve_items(),
+                        inner.items(),
                         reader
                     )?);
                 }
@@ -267,7 +267,7 @@ pub(crate) fn decode_internal<R: Read>(
                     match decode_internal(ResolvedNode::String, reader)? {
                         Value::String(key) => {
                             let value =
-                                decode_internal(inner.resolve_types(), reader)?;
+                                decode_internal(inner.types(), reader)?;
                             items.insert(key, value);
                         }
                         value => return Err(Details::MapKeyType(value.into()).into()),
@@ -279,7 +279,7 @@ pub(crate) fn decode_internal<R: Read>(
         }
         ResolvedNode::Union(inner) => match zag_i64(reader).map_err(Error::into_details) {
             Ok(index) => {
-                let variants = inner.resolve_schemas();
+                let variants = inner.variants();
                 let variant = variants
                     .get(usize::try_from(index).map_err(|e| Details::ConvertI64ToUsize(e, index))?)
                     .ok_or(Details::GetUnionVariant {

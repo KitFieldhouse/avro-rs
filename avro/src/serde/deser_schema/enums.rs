@@ -108,7 +108,7 @@ impl<'s, 'r, R: Read> UnionEnumDeserializer<'s, 'r, R> {
     pub fn new(reader: &'r mut R, schema: ResolvedUnion<'s>, config: Config) -> Self {
         Self {
             reader,
-            variants: schema.resolve_schemas(),
+            variants: schema.variants(),
             config,
         }
     }

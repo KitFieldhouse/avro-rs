@@ -403,16 +403,16 @@ impl Checker {
                     // Can't use RecordField.lookup as aliases are also inserted into there and we
                     // are not allowed to match on writer aliases.
                     // Search using field name and *after* that aliases.
-                    if let Some(w_field) = once(&r_field.name)
+                    if let Some(w_field) = once(&r_field.name.to_string())
                         .chain(r_field.aliases.iter())
-                        .find_map(|ra| w_fields.iter().find(|wf| &wf.name == ra))
+                        .find_map(|ra| w_fields.iter().find(|wf| wf.name.as_ref() == ra))
                     {
                         // Check that the schemas are compatible
                         match self.full_match_schemas(&w_field.schema, &r_field.schema) {
                             Ok(c) => compatibility &= c,
                             Err(err) => {
                                 return Err(CompatibilityError::FieldTypeMismatch(
-                                    r_field.name.clone(),
+                                    r_field.name.to_string(),
                                     Box::new(err),
                                 ));
                             }
@@ -420,7 +420,7 @@ impl Checker {
                     } else if r_field.default.is_none() {
                         // No default and no matching field in the writer
                         return Err(CompatibilityError::MissingDefaultValue(
-                            r_field.name.clone(),
+                            r_field.name.to_string(),
                         ));
                     }
                 }

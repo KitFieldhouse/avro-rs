@@ -519,12 +519,12 @@ impl Parser {
             })?;
 
         for (position, field) in fields.iter().enumerate() {
-            if let Some(_old) = lookup.insert(field.name.clone(), position) {
-                return Err(Details::FieldNameDuplicate(field.name.clone()).into());
+            if let Some(_old) = lookup.insert(Arc::clone(&field.name), position) {
+                return Err(Details::FieldNameDuplicate(field.name.to_string()).into());
             }
 
             for alias in &field.aliases {
-                lookup.insert(alias.clone(), position);
+                lookup.insert(alias.as_str().into(), position);
             }
         }
 

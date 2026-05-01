@@ -483,7 +483,7 @@ impl<'de, 's, 'r, R: Read> Deserializer<'de>
         V: Visitor<'de>,
     {
         if let ResolvedNode::Union(union) = self.schema
-            && union.resolve_schemas().len() == 2
+            && union.variants().len() == 2
             && union.is_nullable()
         {
             let index = zag_i32(self.reader)?;

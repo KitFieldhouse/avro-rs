@@ -38,7 +38,7 @@ pub struct RecordSchema {
     /// The `lookup` table maps field names to their position in the `Vec`
     /// of `fields`.
     #[builder(skip = calculate_lookup_table(&fields))]
-    pub lookup: BTreeMap<String, usize>,
+    pub lookup: BTreeMap<Arc<str>, usize>,
     /// The custom attributes of the schema
     #[builder(default)]
     pub attributes: BTreeMap<String, Value>,
@@ -82,11 +82,11 @@ impl<S: record_schema_builder::State> RecordSchemaBuilder<S> {
 }
 
 /// Calculate the lookup table for the given fields.
-fn calculate_lookup_table(fields: &[RecordField]) -> BTreeMap<String, usize> {
+fn calculate_lookup_table(fields: &[RecordField]) -> BTreeMap<Arc<str>, usize> {
     fields
         .iter()
         .enumerate()
-        .map(|(i, field)| (field.name.clone(), i))
+        .map(|(i, field)| (Arc::clone(&field.name), i))
         .collect()
 }
 
@@ -195,7 +195,7 @@ mod tests {
             .fields(fields.clone())
             .build();
 
-        let expected_lookup: BTreeMap<String, usize> =
+        let expected_lookup: BTreeMap<Arc<str>, usize> =
             [("field1_null".into(), 0), ("field2_bool".into(), 1)]
                 .iter()
                 .cloned()

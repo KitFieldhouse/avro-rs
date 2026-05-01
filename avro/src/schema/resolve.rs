@@ -18,10 +18,10 @@
 // Items used for handling and/or providing named schema resolution.
 
 use serde::Serialize;
-use serde_json::Value as JsonValue;
 use strum::Display;
 
-use crate::schema::{Aliases, ArraySchema, DecimalSchema, DefaultToResolve, Documentation, EnumSchema, FixedSchema, InnerDecimalSchema, MapSchema, Name, NameMap, NameSet, RecordField, RecordSchema, Schema, SchemaKind, SchemaWithSymbols, UnionSchema, UuidSchema, record, unravel_inner};
+use crate::schema::{Aliases, ArraySchema, DecimalSchema, DefaultToResolve, Documentation, EnumSchema, FixedSchema, InnerDecimalSchema, MapSchema, Name, NameMap, NameSet, RecordField, RecordSchema, Schema, SchemaKind, SchemaWithSymbols, UnionSchema, UuidSchema, unravel_inner};
+use crate::types::Value;
 use crate::{AvroResult, types};
 use crate::error::{Details,Error};
 use std::borrow::Borrow;
@@ -31,7 +31,10 @@ use std::{collections::{HashMap, HashSet}, sync::Arc};
 
 /// A map of names and definitions that is valid in that any reference to a named schema has a unambiguous definition.
 #[derive(Debug,Clone)]
-pub struct ResolvedContext(NameMap);
+pub struct ResolvedContext{
+    definitions: NameMap,
+    default_fields: HashMap<(Arc<Name>, Arc<String>), Arc<types::Value>>
+}
 
 impl ResolvedContext{
     /// gets the resolved context from a `ResolvedSchema`
@@ -41,7 +44,7 @@ impl ResolvedContext{
 
     /// Returns a new empty `ResolvedContext`.
     pub fn empty() -> ResolvedContext{
-        ResolvedContext(HashMap::new())
+        ResolvedContext{definitions: HashMap::new(), default_fields: HashMap::new()}
     }
 
     /// Attempts to form a context from the provided schemata. This will use the provided custom
@@ -50,8 +53,8 @@ impl ResolvedContext{
         let mut context : NameMap = HashMap::new();
         let mut defaults : Vec<Arc<Vec<DefaultToResolve>>> = Vec::new();
         Self::add_to_context(&mut context, &mut defaults, schemata, resolver)?;
-        let context = ResolvedContext(context);
-        Self::check_defaults(&defaults, &context)?;
+        let mut context = ResolvedContext{definitions: context, default_fields: HashMap::new()};
+        Self::check_defaults(&defaults, &mut context)?;
         Ok(context)
     }
 
@@ -63,8 +66,8 @@ impl ResolvedContext{
         let mut defaults : Vec<Arc<Vec<DefaultToResolve>>> = Vec::new();
         Self::check_if_schemata_redefine_names(schemata.iter())?;
         Self::add_needed_to_context(schema, &mut context, &mut defaults ,schemata, resolver)?;
-        let context = ResolvedContext(context);
-        Self::check_defaults(&defaults, &context)?;
+        let mut context = ResolvedContext{definitions: context, default_fields: HashMap::new()};
+        Self::check_defaults(&defaults, &mut context)?;
         Ok(context)
     }
 
@@ -184,27 +187,36 @@ impl ResolvedContext{
         }
     }
 
-    fn check_defaults(default_vecs: &Vec<Arc<Vec<DefaultToResolve>>>, context: &ResolvedContext) -> AvroResult<()>{
+    fn check_defaults(default_vecs: &Vec<Arc<Vec<DefaultToResolve>>>, context: &mut ResolvedContext) -> AvroResult<()>{
         for default_vec in default_vecs{
             for default in default_vec.as_ref(){
-                let avro_value = types::Value::try_from(default.json.clone())?;
-                       avro_value.resolve_internal(ResolvedNode::new(&ResolvedSchema{
-                           stub: Arc::new(default.schema.clone()), // TODO: would be nice to get rid of clones here!
-                           context: context.clone()
-                       })).map_err(|error| {
-                           Details::DefaultValidationWithReason {
-                               record_name: default.record_name.clone(),
-                               field_name: default.field_name.clone(),
-                               value: default.json.clone() ,
-                               schema: default.schema.clone(),
-                               reason: error.to_string() }
-                       })?;
+                let mut avro_value = types::Value::try_from(default.json.clone())?;
+                avro_value = avro_value.resolve_internal(ResolvedNode::new(&ResolvedSchema{
+                    stub: Arc::clone(&default.schema), // TODO: would be nice to get rid of clones here!
+                    context: context.clone()
+                })).map_err(|error| {
+                    Details::DefaultValidationWithReason {
+                        record_name: default.defualt_id.0
+                            .as_ref()
+                            .fullname(None)
+                            .to_string(),
+                        field_name: default.defualt_id.1
+                            .as_ref()
+                            .clone(),
+                        value: default.json.clone() ,
+                        schema: default.schema
+                            .as_ref()
+                            .clone(),
+                        reason: error.to_string() }
+                })?;
+                context.default_fields.insert(default.defualt_id.clone(), avro_value.into());
             }
         }
 
         Ok(())
     }
 }
+
 /// Trait for types that can be converted into a [`SchemaWithSymbols`] for schema resolution.
 ///
 /// Implemented for:
@@ -468,12 +480,12 @@ impl ResolvedSchema{
 
     /// Get a reference to the [`NameMap`] for this `ResolvedSchema`.
     pub fn get_names(&self) -> &NameMap{
-        &self.context.0
+        &self.context.definitions
     }
 
     /// Get an [`Iterator`] of this `ResolvedSchema`'s defined schemata.
     pub fn get_schemata(&self) -> impl Iterator<Item = &Arc<Schema>>{
-        self.context.0.values()
+        self.context.definitions.values()
     }
 }
 
@@ -510,8 +522,9 @@ pub struct ResolvedRecord<'a>{
 /// provided default value has been resolved against this schema.
 #[derive(Clone,Debug)]
 pub struct ResolvedRecordField<'a>{
+    parent_name: &'a Arc<Name>,
     root: &'a ResolvedSchema,
-    field_schema: &'a RecordField
+    field: &'a RecordField
 }
 
 /// A node within a walk of a Avro Schema that makes the type level promise that its children
@@ -557,20 +570,9 @@ impl<'a> ResolvedNode<'a> {
        match schema {
         Schema::Map(map_schema) => ResolvedNode::Map(ResolvedMap{root, map_schema}),
         Schema::Union(union_schema) => ResolvedNode::Union(ResolvedUnion{root, union_schema}),
-        Schema::Array(ArraySchema { items, attributes }) => ResolvedNode::Array(ResolvedArray{items, attributes, root,schema}),
-        Schema::Record(RecordSchema { name, aliases, doc, fields, lookup, attributes }) => {
-            let fields : Vec<_> = fields.iter()
-                .map(|field|{
-                    let RecordField {name, doc, aliases, default, schema, custom_attributes} = field;
-                    let default_value = default.as_ref().map(|json_value|{
-                        crate::types::Value::try_from(json_value.clone())
-                        .expect("unable to resolve defualt json value into value. This is an internal error and should never be reached.")
-                    });
-                    ResolvedRecordField{name, doc, aliases, default: default_value.into(), schema, custom_attributes, record_field: field, root}
-                }).collect();
-            ResolvedNode::Record(ResolvedRecord{ name, aliases, doc, fields: fields.into(), lookup, attributes, root, schema})
-        },
-        Schema::Ref{name} => Self::from_schema(root.context.0.get(name).unwrap().as_ref(), root),
+        Schema::Array(array_schema) => ResolvedNode::Array(ResolvedArray{root, array_schema}),
+        Schema::Record(record_schema) => ResolvedNode::Record(ResolvedRecord{root, record_schema}),
+        Schema::Ref{name} => Self::from_schema(root.context.definitions.get(name).unwrap().as_ref(), root),
         Schema::Null => ResolvedNode::Null,
         Schema::Boolean => ResolvedNode::Boolean,
         Schema::Int => ResolvedNode::Int,
@@ -597,48 +599,25 @@ impl<'a> ResolvedNode<'a> {
        }
    }
 
-   /// For a given resolved node, recreates the [`ResolvedContext`] used to start create this node
-   /// and uses the current node as the stub of this context.
-   pub fn get_resolved(&self) -> ResolvedSchema{
-       match self {
-        ResolvedNode::Map(resolved_map) => ResolvedSchema{stub: resolved_map.schema.clone().into(), context: resolved_map.root.context.clone()},
-        ResolvedNode::Union(resolved_union) => ResolvedSchema{stub: resolved_union.schema.clone().into(), context: resolved_union.root.context.clone()},
-        ResolvedNode::Array(resolved_array) => ResolvedSchema{stub: resolved_array.schema.clone().into(), context: resolved_array.root.context.clone()},
-        ResolvedNode::Record(resolved_record) => ResolvedSchema{stub: resolved_record.schema.clone().into(), context: resolved_record.root.context.clone()},
-        ResolvedNode::Uuid(uuid_schema) => ResolvedSchema{stub: Schema::Uuid((*uuid_schema).clone()).into(), context: ResolvedContext::empty()},
-        ResolvedNode::Duration(fixed_schema) => ResolvedSchema{stub: Schema::Duration((*fixed_schema).clone()).into(), context: ResolvedContext::empty()},
-        ResolvedNode::Enum(enum_schema) => ResolvedSchema{stub: Schema::Enum((*enum_schema).clone()).into(), context: ResolvedContext::empty()},
-        ResolvedNode::Fixed(fixed_schema) => ResolvedSchema{stub: Schema::Fixed((*fixed_schema).clone()).into(), context: ResolvedContext::empty()},
-        ResolvedNode::Decimal(decimal_schema) => ResolvedSchema{stub: Schema::Decimal((*decimal_schema).clone()).into(), context: ResolvedContext::empty()},
-        ResolvedNode::Null => ResolvedSchema{stub: Schema::Null.into(), context: ResolvedContext::empty()},
-        ResolvedNode::Boolean => ResolvedSchema{stub: Schema::Boolean.into(), context: ResolvedContext::empty()},
-        ResolvedNode::Int => ResolvedSchema{stub: Schema::Int.into(), context: ResolvedContext::empty()},
-        ResolvedNode::Long => ResolvedSchema{stub: Schema::Long.into(), context: ResolvedContext::empty()},
-        ResolvedNode::Float => ResolvedSchema{stub: Schema::Float.into(), context: ResolvedContext::empty()},
-        ResolvedNode::Double => ResolvedSchema{stub: Schema::Double.into(), context: ResolvedContext::empty()},
-        ResolvedNode::Bytes => ResolvedSchema{stub: Schema::Bytes.into(), context: ResolvedContext::empty()},
-        ResolvedNode::String => ResolvedSchema{stub: Schema::String.into(), context: ResolvedContext::empty()},
-        ResolvedNode::BigDecimal => ResolvedSchema{stub: Schema::BigDecimal.into(), context: ResolvedContext::empty()},
-        ResolvedNode::Date => ResolvedSchema{stub: Schema::Date.into(), context: ResolvedContext::empty()},
-        ResolvedNode::TimeMillis => ResolvedSchema{stub: Schema::TimeMillis.into(), context: ResolvedContext::empty()},
-        ResolvedNode::TimeMicros => ResolvedSchema{stub: Schema::TimeMicros.into(), context: ResolvedContext::empty()},
-        ResolvedNode::TimestampMillis => ResolvedSchema{stub: Schema::TimestampMillis.into(), context: ResolvedContext::empty()},
-        ResolvedNode::TimestampMicros => ResolvedSchema{stub: Schema::TimestampMicros.into(), context: ResolvedContext::empty()},
-        ResolvedNode::TimestampNanos => ResolvedSchema{stub: Schema::TimestampNanos.into(), context: ResolvedContext::empty()},
-        ResolvedNode::LocalTimestampMillis => ResolvedSchema{stub: Schema::LocalTimestampMillis.into(), context: ResolvedContext::empty()},
-        ResolvedNode::LocalTimestampMicros => ResolvedSchema{stub: Schema::LocalTimestampMicros.into(), context: ResolvedContext::empty()},
-        ResolvedNode::LocalTimestampNanos => ResolvedSchema{stub: Schema::LocalTimestampNanos.into(), context: ResolvedContext::empty()},
-       }
-   }
-
-   // KTODO: docs
+   /// Gets the name of this [`ResolvedNode`], if it has one
    pub fn get_name(&self)-> Option<Arc<Name>>{
-       self.get_resolved().stub.name().map(Arc::clone)
+        match self {
+              ResolvedNode::Record(resolved_record) => Some(Arc::clone(&resolved_record.record_schema.name)),
+              ResolvedNode::Enum(EnumSchema { name, .. })
+            | ResolvedNode::Fixed(FixedSchema { name, .. })
+            | ResolvedNode::Decimal(DecimalSchema {
+                inner: InnerDecimalSchema::Fixed(FixedSchema { name, .. }),
+                ..
+            })
+            | ResolvedNode::Uuid(UuidSchema::Fixed(FixedSchema { name, .. }))
+            | ResolvedNode::Duration(FixedSchema { name, .. }) => Some(Arc::clone(name)),
+            _ => None,
+        }
    }
 
-   // KTODO: docs
+   // KTODO: docs, need to think about a bit more!
    pub fn unravel(&self)->Schema{
-       self.get_resolved().unravel()
+       todo!()
    }
 }
 
@@ -685,19 +664,81 @@ impl<'a> ResolvedRecord<'a>{
             unreachable!();
         }
     }
+
+    pub fn name(&self) -> &Arc<Name>{
+        &self.record_schema.name
+    }
+
+    pub fn aliases(&self)-> &'a Aliases{
+        &self.record_schema.aliases
+    }
+
+    pub fn doc(&self) -> &'a Documentation{
+        &self.record_schema.doc
+    }
+
+
+    pub fn lookup(&self) -> &'a BTreeMap<String, usize>{
+        &self.record_schema.lookup
+    }
+
+    pub fn attributes(&self) -> &'a BTreeMap<String, serde_json::Value>{
+        &self.record_schema.attributes
+    }
+
+    pub fn fields(&self) -> impl Iterator<Item = ResolvedRecordField<'a>>{
+        self.record_schema.fields.iter().map(|field|{
+            ResolvedRecordField{
+                parent_name: &self.record_schema.name,
+                field,
+                root: self.root
+            }
+        })
+    }
+
+    pub fn get_field(&self, index: usize) -> Option<ResolvedRecordField<'a>>{
+        self.record_schema.fields.get(index).map(|field|{
+            ResolvedRecordField{
+                parent_name: &self.record_schema.name,
+                field,
+                root: self.root
+            }
+        })
+    }
+
 }
 
 impl<'a> ResolvedMap<'a>{
-    pub fn resolve_types(&self)->ResolvedNode<'a>{
-       ResolvedNode::from_schema(self.types, self.root)
+    pub fn types(&self)->ResolvedNode<'a>{
+       ResolvedNode::from_schema(&self.map_schema.types, self.root)
+    }
+
+    pub fn attributes(&self)-> &'a BTreeMap<String, serde_json::Value>{
+        &self.map_schema.attributes
     }
 }
 
+
+// KTODO: is the Iterator opaque type okay here??
 impl<'a> ResolvedUnion<'a>{
-    pub fn resolve_schemas(&self)->Vec<ResolvedNode<'a>>{
-        self.schemas.iter().map(|schema|{
+    pub fn variants(&self)-> impl Iterator<Item = ResolvedNode<'a>>{
+        self.union_schema.schemas.iter().map(|schema|{
             ResolvedNode::from_schema(schema, self.root)
-        }).collect()
+        })
+    }
+
+
+    /// Get variant at given index.
+    pub fn get_variant(&self, index: usize)->AvroResult<ResolvedNode<'a>>{
+        self.union_schema.schemas.get(index).map(|schema|{
+            ResolvedNode::from_schema(schema, self.root)
+        }).ok_or_else(|| {
+            Details::GetUnionVariant {
+                index: index as i64,
+                num_variants: self.union_schema.schemas.len(),
+            }
+            .into()
+        })
     }
 
     /// For getting the original schema for nice error printing
@@ -708,10 +749,9 @@ impl<'a> ResolvedUnion<'a>{
 
     pub fn structural_match_on_schema(&'a self, value: &types::Value) -> Option<(usize,ResolvedNode<'a>)>{
         let value_schema_kind = SchemaKind::from(value);
-        let resolved_nodes = self.resolve_schemas();
         if let Some(i) = self.index_of_schema_kind(&value_schema_kind) {
             // fast path
-            let variant_clone = resolved_nodes.get(i).unwrap().clone();
+            let variant_clone = self.get_variant(i).unwrap().clone();
             if value
                 .clone()
                 .resolve_internal(variant_clone.clone())
@@ -722,7 +762,7 @@ impl<'a> ResolvedUnion<'a>{
             }
         } else {
             // slow path (required for matching logical or named types)
-            self.resolve_schemas().into_iter().enumerate().find(|(_, resolved_node)| {
+            self.variants().into_iter().enumerate().find(|(_, resolved_node)| {
                 value
                     .clone()
                     .resolve_internal(resolved_node.clone())
@@ -732,7 +772,7 @@ impl<'a> ResolvedUnion<'a>{
     }
 
     pub fn index_of_schema_kind<K: Borrow<SchemaKind>>(&self, schema_kind: K) -> Option<usize>{
-       self.variant_index.get(schema_kind.borrow()).copied()
+       self.union_schema.variant_index.get(schema_kind.borrow()).copied()
     }
 
     /// Get the index and schema for the provided Rust type name.
@@ -742,7 +782,7 @@ impl<'a> ResolvedUnion<'a>{
         &'s self,
         name: &str,
     ) -> Option<(usize, ResolvedNode<'a>)> {
-        self.resolve_schemas().into_iter().enumerate().find(|(_index, node)|{
+        self.variants().into_iter().enumerate().find(|(_index, node)|{
             node.get_name()
                 .is_some_and(|schema_name|{schema_name.name() == name})
         })
@@ -753,7 +793,7 @@ impl<'a> ResolvedUnion<'a>{
         &self,
         size: usize,
     ) -> Option<(usize, &'a FixedSchema)> {
-        self.resolve_schemas().into_iter().enumerate().find_map(|(index, node)|{
+        self.variants().into_iter().enumerate().find_map(|(index, node)|{
             match node {
                 ResolvedNode::Fixed(fixed)
                 | ResolvedNode::Uuid(UuidSchema::Fixed(fixed))
@@ -776,23 +816,13 @@ impl<'a> ResolvedUnion<'a>{
         &self,
         n_fields: usize,
     ) -> Option<(usize, ResolvedRecord<'a>)> {
-        self.resolve_schemas().into_iter().enumerate().find_map(|(index, node)|{
+        self.variants().into_iter().enumerate().find_map(|(index, node)|{
             match node {
-                ResolvedNode::Record(record) if record.fields.len() == n_fields => {
+                ResolvedNode::Record(record) if record.record_schema.fields.len() == n_fields => {
                     Some((index, record))
                 }
                 _ => {None}
             }
-        })
-    }
-
-    pub fn get_variant(&self, index: usize)->AvroResult<ResolvedNode<'a>>{
-        self.resolve_schemas().get(index).cloned().ok_or_else(|| {
-            Details::GetUnionVariant {
-                index: index as i64,
-                num_variants: self.schemas.len(),
-            }
-            .into()
         })
     }
 
@@ -803,20 +833,46 @@ impl<'a> ResolvedUnion<'a>{
 }
 
 impl<'a> ResolvedArray<'a>{
-    pub fn resolve_items(&self)->ResolvedNode<'a>{
-        ResolvedNode::from_schema(self.items, self.root)
+    pub fn items(&self)->ResolvedNode<'a>{
+        ResolvedNode::from_schema(&self.array_schema.items, self.root)
+    }
+
+    pub fn attributes(&self) -> &'a BTreeMap<String, serde_json::Value>{
+        &self.array_schema.attributes
     }
 }
 
 impl<'a> ResolvedRecordField<'a>{
-    pub fn resolve_field(&self)->ResolvedNode<'a>{
-        ResolvedNode::from_schema(self.schema, self.root)
+    pub fn schema(&self)->ResolvedNode<'a>{
+        ResolvedNode::from_schema(&self.field.schema, self.root)
     }
 
-    // delegate to implementation on Schema
     pub fn is_nullable(&self) -> bool {
-        self.record_field.is_nullable()
+        self.field.is_nullable()
     }
+
+    pub fn doc(&self)->&'a Documentation{
+        &self.field.doc
+    }
+
+    pub fn default(&self)-> Option<&'a Value>{
+        if self.field.default.is_some(){
+            self.root.context.default_fields
+                .get(&(Arc::clone(self.parent_name), Arc::clone(&self.field.name)))
+                .map(|value|{value.as_ref()})
+        }else{ // fast path, don't need to lookup default value
+            None
+        }
+    }
+
+    pub fn aliases(&self) -> &'a Vec<String>{
+        &self.field.aliases
+    }
+
+    pub fn custom_attributes(&self) -> &'a BTreeMap<String, serde_json::Value>{
+        &self.field.custom_attributes
+    }
+
 }
 
 /// Represents an Avro [Schema] with a type level promise that this `Schema` is self contained and
@@ -840,7 +896,7 @@ impl CompleteSchema{
 impl From<&ResolvedSchema> for CompleteSchema{
     fn from(value: &ResolvedSchema) -> Self {
         let mut stub = value.stub.as_ref().clone();
-        unravel_inner(&mut stub, &value.context.0, &mut HashSet::new(),  &mut HashMap::new());
+        unravel_inner(&mut stub, &value.context.definitions, &mut HashSet::new(),  &mut HashMap::new());
         CompleteSchema(stub)
     }
 }
@@ -879,15 +935,15 @@ impl Serialize for ResolvedSchema{
 
 impl PartialEq for ResolvedSchema{
     fn eq(&self, other: &Self) -> bool {
-        compare_schema_and_context(&self.stub, &other.stub, &self.context.0, &other.context.0, &HashSet::new(), &HashSet::new())
+        compare_schema_and_context(&self.stub, &other.stub, &self.context.definitions, &other.context.definitions, &HashSet::new(), &HashSet::new())
     }
 }
 
+
+// KTODO: need to think about this a little more...
 impl PartialEq for ResolvedNode<'_>{
     fn eq(&self, other: &Self) -> bool {
-        let resolved_self = self.get_resolved();
-        let resolved_other = other.get_resolved();
-        resolved_other.unravel() == resolved_self.unravel()
+        todo!();
     }
 }
 
@@ -1437,7 +1493,7 @@ mod tests {
                 let field_node = rec.fields[0].resolve_field();
                 match field_node {
                     ResolvedNode::Union(union) => {
-                        let variants = union.resolve_schemas();
+                        let variants = union.variants();
                         assert_eq!(variants.len(), 2);
                         assert!(matches!(variants[0], ResolvedNode::Null));
                         assert!(matches!(variants[1], ResolvedNode::Record(_)));
@@ -1481,7 +1537,7 @@ mod tests {
                 let field_node = rec.fields[0].resolve_field();
                 match field_node {
                     ResolvedNode::Array(arr) => {
-                        let items_node = arr.resolve_items();
+                        let items_node = arr.items();
                         assert!(matches!(items_node, ResolvedNode::Record(_)));
                     },
                     other => panic!("expected Array, got {other}"),
@@ -1523,7 +1579,7 @@ mod tests {
                 let field_node = rec.fields[0].resolve_field();
                 match field_node {
                     ResolvedNode::Map(map) => {
-                        let values_node = map.resolve_types();
+                        let values_node = map.types();
                         assert!(matches!(values_node, ResolvedNode::Record(_)));
                     },
                     other => panic!("expected Map, got {other}"),
@@ -2756,7 +2812,7 @@ mod tests {
         }"#;
 
         let [rs] = ResolvedSchema::builder().additional([schema2, schema3, schema4, schema5])?.build_array([schema1])?;
-        let my_fixed = rs.context.0.get(&Name::try_from("myfixed")?);
+        let my_fixed = rs.context.definitions.get(&Name::try_from("myfixed")?);
 
         assert_eq!(
             my_fixed,

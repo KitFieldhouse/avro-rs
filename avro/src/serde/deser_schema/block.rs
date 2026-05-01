@@ -38,7 +38,7 @@ impl<'s, 'r, R: Read> BlockDeserializer<'s, 'r, R> {
         schema: ResolvedArray<'s>,
         config: Config,
     ) -> Result<Self, Error> {
-        let schema = schema.resolve_items();
+        let schema = schema.items();
         let remaining = Self::read_block_header(reader)?;
         Ok(Self {
             reader,
@@ -53,7 +53,7 @@ impl<'s, 'r, R: Read> BlockDeserializer<'s, 'r, R> {
         schema: ResolvedMap<'s>,
         config: Config,
     ) -> Result<Self, Error> {
-        let schema = schema.resolve_types();
+        let schema = schema.types();
         let remaining = Self::read_block_header(reader)?;
         Ok(Self {
             reader,

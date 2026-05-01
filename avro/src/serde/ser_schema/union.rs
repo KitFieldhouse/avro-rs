@@ -394,7 +394,7 @@ impl<'s, 'w, W: Write> Serializer for UnionSerializer<'s, 'w, W> {
 
     fn serialize_seq(self, len: Option<usize>) -> Result<Self::SerializeSeq, Self::Error> {
         if let Some(index) = self.union.index_of_schema_kind(SchemaKind::Array)
-            && let ResolvedNode::Array(array) = &self.union.resolve_schemas()[index]
+            && let ResolvedNode::Array(array) = &self.union.variants()[index]
         {
             let bytes_written = zig_i32(index as i32, &mut *self.writer)?;
             BlockSerializer::array(self.writer, array.clone(), self.config, len, Some(bytes_written))
@@ -472,7 +472,7 @@ impl<'s, 'w, W: Write> Serializer for UnionSerializer<'s, 'w, W> {
 
     fn serialize_map(self, len: Option<usize>) -> Result<Self::SerializeMap, Self::Error> {
         let map_index = self.union.index_of_schema_kind(SchemaKind::Map).map(|i| {
-            if let ResolvedNode::Map(map) = &self.union.resolve_schemas()[i] {
+            if let ResolvedNode::Map(map) = &self.union.variants()[i] {
                 (i, map.clone())
             } else {
                 unreachable!("SchemaKind is Map so Schema must also be a Map")

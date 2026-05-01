@@ -83,7 +83,7 @@ pub(crate) fn encode_internal<W: Write>(
     match value {
         Value::Null => {
             if let ResolvedNode::Union(union) = node {
-                match union.resolve_schemas().iter().position(|sch| SchemaKind::from(sch) == SchemaKind::Null) {
+                match union.variants().iter().position(|sch| SchemaKind::from(sch) == SchemaKind::Null) {
                     None => Err(Details::EncodeValueAsSchemaError {
                         value_kind: ValueKind::Null,
                         supported_schema: vec![SchemaKind::Null, SchemaKind::Union],
@@ -218,7 +218,7 @@ pub(crate) fn encode_internal<W: Write>(
         Value::Enum(i, _) => encode_int(*i as i32, writer),
         Value::Union(idx, item) => {
             if let ResolvedNode::Union(inner) = node {
-                let resolved = inner.resolve_schemas();
+                let resolved = inner.variants();
                 let inner_schema = resolved
                     .get(*idx as usize)
                     .expect("Invalid Union validation occurred");
@@ -240,7 +240,7 @@ pub(crate) fn encode_internal<W: Write>(
                     for item in items.iter() {
                         encode_internal(
                             item,
-                            inner.resolve_items(),
+                            inner.items(),
                             &mut *writer
                         )?;
                     }
@@ -265,7 +265,7 @@ pub(crate) fn encode_internal<W: Write>(
                         encode_bytes(key, &mut *writer)?;
                         encode_internal(
                             value,
-                            inner.resolve_types(),
+                            inner.types(),
                             &mut *writer,
                         )?;
                     }
@@ -320,7 +320,7 @@ pub(crate) fn encode_internal<W: Write>(
                 Ok(written_bytes)
             } else if let ResolvedNode::Union(resolved_union) = node {
                 let mut union_buffer: Vec<u8> = Vec::new();
-                for (index, schema) in resolved_union.resolve_schemas().iter().enumerate() {
+                for (index, schema) in resolved_union.variants().iter().enumerate() {
                     encode_long(index as i64, &mut union_buffer)?;
                     let encode_res = encode_internal(
                         value,

@@ -26,19 +26,20 @@ use serde::{Serialize, Serializer};
 use serde_json::{Map, Value};
 use std::collections::BTreeMap;
 use std::fmt::{Debug, Formatter};
+use std::sync::Arc;
 
 /// Represents a `field` in a `record` Avro schema.
 #[derive(bon::Builder, Clone, PartialEq)]
 pub struct RecordField {
     /// Name of the field.
     #[builder(into)]
-    pub name: String,
+    pub name: Arc<str>,
     /// Documentation of the field.
     #[builder(default)]
     pub doc: Documentation,
     /// Aliases of the field's name. They have no namespace.
     #[builder(default)]
-    pub aliases: Vec<String>,
+    pub aliases: Vec<String>, // TODO: maybe wrap this with Arc as well?
     /// Default value of the field.
     /// This value will be used when reading Avro datum if schema resolution
     /// is enabled.
@@ -84,7 +85,7 @@ impl RecordField {
     pub(crate) fn parse(
         field: &Map<String, Value>,
         parser: &mut Parser,
-        enclosing_record: &Name,
+        enclosing_record: &Arc<Name>,
     ) -> AvroResult<Self> {
         let name = field.name().ok_or(Details::GetNameFieldFromRecord)?;
 
@@ -102,11 +103,11 @@ impl RecordField {
             );
         }
 
+        let arc_name : Arc<str> = name.into();
         field.get("default").cloned().inspect(|value|{
             parser.field_defaults_to_resolve.push(DefaultToResolve {
-                field_name: name.to_string(),
-                record_name: enclosing_record.fully_qualified_name(Option::None).to_string(),
-                schema: schema.clone(),
+                defualt_id: (Arc::clone(enclosing_record), Arc::clone(&arc_name)),
+                schema: schema.clone().into(),
                 json: value.clone() });
         });
 
@@ -124,7 +125,7 @@ impl RecordField {
             .unwrap_or_default();
 
         Ok(RecordField {
-            name: name.into(),
+            name: arc_name,
             doc: field.doc(),
             default: field.get("default").cloned(),
             aliases,
@@ -159,7 +160,7 @@ impl Serialize for RecordField {
         S: Serializer,
     {
         let mut map = serializer.serialize_map(None)?;
-        map.serialize_entry("name", &self.name)?;
+        map.serialize_entry("name", self.name.as_ref())?;
         map.serialize_entry("type", &self.schema)?;
 
         if let Some(default) = &self.default {
@@ -219,13 +220,13 @@ mod tests {
             .name("str_slice")
             .schema(Schema::Boolean)
             .build();
-        assert_eq!(field.name, "str_slice");
+        assert_eq!(field.name.as_ref(), "str_slice");
 
         let field = RecordField::builder()
             .name("String".to_string())
             .schema(Schema::Boolean)
             .build();
-        assert_eq!(field.name, "String");
+        assert_eq!(field.name.as_ref(), "String");
 
         Ok(())
     }
