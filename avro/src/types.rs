@@ -32,6 +32,7 @@ use crate::{
 use bigdecimal::BigDecimal;
 use log::{error};
 use serde_json::{Number, Value as JsonValue};
+use std::sync::Arc;
 use std::{
     collections::{BTreeMap, HashMap},
     fmt::Debug,
@@ -213,8 +214,8 @@ pub struct Record<'a> {
     /// List of fields contained in the record.
     /// Ordered according to the fields in the schema given to create this
     /// `Record` object. Any unset field defaults to `Value::Null`.
-    pub fields: Vec<(String, Value)>,
-    schema_lookup: &'a BTreeMap<String, usize>,
+    pub fields: Vec<(String, Value)>, // KTODO: Should this be arc'd? refers to schemas field names.
+    schema_lookup: &'a BTreeMap<Arc<str>, usize>,
 }
 
 impl Record<'_> {
@@ -230,7 +231,7 @@ impl Record<'_> {
             }) => {
                 let mut fields = Vec::with_capacity(schema_fields.len());
                 for schema_field in schema_fields.iter() {
-                    fields.push((schema_field.name.clone(), Value::Null));
+                    fields.push((schema_field.name.to_string(), Value::Null));
                 }
 
                 Some(Record {
@@ -546,10 +547,9 @@ impl Value {
                 }),
             // (&Value::Union(None), &Schema::Union(_)) => None,
             (&Value::Union(i, ref value), ResolvedNode::Union(inner)) => inner
-                .variants()
-                .get(i as usize)
+                .get_variant(i as usize)
                 .map(|node| value.validate_internal(node.clone()))
-                .unwrap_or_else(|| Some(format!("No schema in the union at position '{i}'"))),
+                .unwrap_or_else(|_| Some(format!("No schema in the union at position '{i}'"))),
             (v, ResolvedNode::Union(inner)) => {
                 match inner.structural_match_on_schema(v) {
                     Some(_) => None,
@@ -572,10 +572,10 @@ impl Value {
             }
             (
                 Value::Record(record_fields),
-                ResolvedNode::Record(ResolvedRecord{fields,lookup, name: _, ..})
+                ResolvedNode::Record(resolved_record)
             ) => {
                 let non_nullable_fields_count =
-                    fields.iter().filter(|&rf| !rf.is_nullable()).count();
+                    resolved_record.fields().filter(|&rf| !rf.is_nullable()).count();
 
                 // If the record contains fewer fields as required fields by the schema, it is invalid.
                 if record_fields.len() < non_nullable_fields_count {
@@ -584,18 +584,18 @@ impl Value {
                         record_fields.len(),
                         non_nullable_fields_count
                     ));
-                } else if record_fields.len() > fields.len() {
+                } else if record_fields.len() > resolved_record.field_len() {
                     return Some(format!(
                         "The value's records length ({}) is greater than the schema's ({} fields)",
                         record_fields.len(),
-                        fields.len(),
+                        resolved_record.field_len(),
                     ));
                 }
 
                 record_fields
                     .iter()
                     .fold(None, |acc, (field_name, record_field)| {
-                        match lookup.get(field_name) {
+                        match resolved_record.lookup().get(field_name) {
                             Some(idx) => {
                                 let resolved_field = fields.get(*idx).unwrap();
                                 Value::accumulate(
@@ -1513,9 +1513,9 @@ mod tests {
                     .build(),
             ],
             lookup: [
-                ("a".to_string(), 0),
-                ("b".to_string(), 1),
-                ("c".to_string(), 2),
+                ("a".into(), 0),
+                ("b".into(), 1),
+                ("c".into(), 2),
             ]
             .iter()
             .cloned()
