@@ -192,7 +192,7 @@ impl ResolvedContext{
             for default in default_vec.as_ref(){
                 let mut avro_value = types::Value::try_from(default.json.clone())?;
                 avro_value = avro_value.resolve_internal(ResolvedNode::new(&ResolvedSchema{
-                    stub: Arc::clone(&default.schema), // TODO: would be nice to get rid of clones here!
+                    stub: Arc::clone(&default.schema),
                     context: context.clone()
                 })).map_err(|error| {
                     Details::DefaultValidationWithReason {
