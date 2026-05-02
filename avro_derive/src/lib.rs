@@ -214,7 +214,7 @@ fn get_struct_schema_def(
                 let schema_expr = get_field_schema_expr(&field, field_attrs.with)?;
                 record_field_exprs.push(quote! {
                     schema_fields.push(::apache_avro::schema::RecordField {
-                        name: #name.to_string(),
+                        name: #name.into(),
                         doc: #doc,
                         default: #default_value,
                         aliases: #aliases,
@@ -253,10 +253,10 @@ fn get_struct_schema_def(
             let schema_field_set: ::std::collections::HashSet<_> = schema_fields.iter().map(|rf| &rf.name).collect();
             assert_eq!(schema_fields.len(), schema_field_set.len(), "Duplicate field names found: {schema_fields:?}");
             let name = ::apache_avro::schema::Name::new(#full_schema_name).expect(&format!("Unable to parse struct name for schema {}", #full_schema_name)[..]);
-            let lookup: ::std::collections::BTreeMap<String, usize> = schema_fields
+            let lookup: ::std::collections::BTreeMap<::std::sync::Arc<str>, usize> = schema_fields
                 .iter()
                 .enumerate()
-                .map(|(position, field)| (field.name.to_owned(), position))
+                .map(|(position, field)| (::std::sync::Arc::clone(&field.name), position))
                 .collect();
             ::apache_avro::schema::Schema::Record(::apache_avro::schema::RecordSchema {
                 name: std::sync::Arc::new(name),
@@ -476,7 +476,7 @@ fn aliases(op: &[impl quote::ToTokens]) -> TokenStream {
 fn field_aliases(op: &[impl quote::ToTokens]) -> TokenStream {
     let items: Vec<TokenStream> = op
         .iter()
-        .map(|tt| quote! {#tt.try_into().expect("Alias is invalid")})
+        .map(|tt| quote! {#tt.into()})
         .collect();
     if items.is_empty() {
         quote! {::std::vec::Vec::new()}
