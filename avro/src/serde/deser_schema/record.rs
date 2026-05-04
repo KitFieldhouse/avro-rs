@@ -81,7 +81,7 @@ impl<'de, 's, 'r, R: Read> MapAccess<'de> for RecordDeserializer<'s, 'r, R> {
         } else {
             seed.deserialize(SchemaAwareDeserializer::new(
                 self.reader,
-                schema.clone(),
+                *schema,
                 self.config,
             ))?
         };

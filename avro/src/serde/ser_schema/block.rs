@@ -191,7 +191,7 @@ impl<'s, 'w, W: Write> SerializeSeq for DirectBlockSerializer<'s, 'w, W> {
     {
         self.bytes_written += value.serialize(SchemaAwareSerializer::new(
             self.writer,
-            self.schema.clone(),
+            self.schema,
             self.config,
         )?)?;
         Ok(())
@@ -303,7 +303,7 @@ impl<'s, 'w, W: Write> SerializeSeq for BufferedBlockSerializer<'s, 'w, W> {
     {
         value.serialize(SchemaAwareSerializer::new(
             &mut self.buffer,
-            self.schema.clone(),
+            self.schema,
             self.config,
         )?)?;
         self.items_in_buffer += 1;

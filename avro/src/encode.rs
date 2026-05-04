@@ -15,7 +15,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-use crate::schema::{InnerDecimalSchema, UuidSchema, ResolvedNode, ResolvedRecord};
+use crate::schema::{InnerDecimalSchema, UuidSchema, ResolvedNode};
 use crate::{
     AvroResult,
     bigdecimal::serialize_big_decimal,
@@ -28,6 +28,7 @@ use crate::{
     util::{zig_i32, zig_i64},
 };
 use log::error;
+use std::borrow::Borrow;
 use std::{collections::HashMap, io::Write};
 
 /// Encode a `Value` into avro format. This function will first attempt to convert the provided [`Schema`] into a [`ResolvedSchema`]
@@ -49,8 +50,8 @@ pub fn encode<W: Write>(value: &Value, schema: &Schema, writer: &mut W) -> AvroR
 /// be valid with regards to the schema. Schema are needed only to guide the
 /// encoding for complex type values.
 ///
-pub fn encode_complete<W: Write>(value: &Value, resolved_schema: ResolvedSchema, writer: &mut W) -> AvroResult<usize> {
-    encode_internal(value, ResolvedNode::new(&resolved_schema), writer)
+pub fn encode_complete<W: Write>(value: &Value, resolved_schema: impl Borrow<ResolvedSchema>, writer: &mut W) -> AvroResult<usize> {
+    encode_internal(value, ResolvedNode::new(resolved_schema.borrow()), writer)
 }
 
 /// Encode `s` as the _bytes_ primitive type.
@@ -222,7 +223,7 @@ pub(crate) fn encode_internal<W: Write>(
                     .get_variant(*idx as usize)
                     .expect("Invalid Union validation occurred");
                 encode_long(*idx as i64, &mut *writer)?;
-                encode_internal(item, inner_schema.clone(), &mut *writer)
+                encode_internal(item, inner_schema, &mut *writer)
             } else {
                 error!("invalid schema type for Union: {:?}", SchemaKind::from(&node));
                 Err(Details::EncodeValueAsSchemaError {
@@ -320,7 +321,7 @@ pub(crate) fn encode_internal<W: Write>(
                     encode_long(index as i64, &mut union_buffer)?;
                     let encode_res = encode_internal(
                         value,
-                        schema.clone(),
+                        schema,
                         &mut union_buffer,
                     );
                     match encode_res {

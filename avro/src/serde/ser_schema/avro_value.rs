@@ -32,7 +32,7 @@ pub struct AvroValueSerialize<'s, B : Borrow<Value>> {
 
 impl<'s> AvroValueSerialize<'s, Value> {
     pub fn new_with_schema(value: &Value, schema: ResolvedNode<'s>) -> AvroResult<Self>{
-        let value = value.clone().resolve_internal(schema.clone())?;
+        let value = value.clone().resolve_internal(schema)?;
         Ok(AvroValueSerialize{value, schema: Some(schema)})
     }
 }

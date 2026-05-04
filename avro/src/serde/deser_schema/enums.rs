@@ -133,7 +133,7 @@ impl<'de, 's, 'r, R: Read> EnumAccess<'de>
 
         Ok((
             seed.deserialize(IdentifierDeserializer::index(index as u32))?,
-            UnionVariantAccess::new(schema.clone(), self.reader, self.config),
+            UnionVariantAccess::new(*schema, self.reader, self.config),
         ))
     }
 }

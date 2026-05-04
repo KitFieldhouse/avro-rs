@@ -548,7 +548,7 @@ impl Value {
             // (&Value::Union(None), &Schema::Union(_)) => None,
             (&Value::Union(i, ref value), ResolvedNode::Union(inner)) => inner
                 .get_variant(i as usize)
-                .map(|node| value.validate_internal(node.clone()))
+                .map(|node| value.validate_internal(node))
                 .unwrap_or_else(|_| Some(format!("No schema in the union at position '{i}'"))),
             (v, ResolvedNode::Union(inner)) => {
                 match inner.structural_match_on_schema(v) {
@@ -1082,7 +1082,7 @@ impl Value {
             Value::Array(items) => Ok(Value::Array(
                 items
                     .into_iter()
-                    .map(|item| item.resolve_internal(items_resolved.clone()))
+                    .map(|item| item.resolve_internal(items_resolved))
                     .collect::<Result<_, _>>()?,
             )),
             other => Err(Details::GetArray {
@@ -1104,7 +1104,7 @@ impl Value {
                     .into_iter()
                     .map(|(key, value)| {
                         value
-                            .resolve_internal(resolved_types.clone())
+                            .resolve_internal(resolved_types)
                             .map(|value| (key, value))
                     })
                     .collect::<Result<_, _>>()?,

@@ -89,7 +89,7 @@ impl<'de, 's, 'r, R: Read> SeqAccess<'de> for BlockDeserializer<'s, 'r, R> {
         if let Some(mut remaining) = self.remaining {
             let value = seed.deserialize(SchemaAwareDeserializer::new(
                 self.reader,
-                self.schema.clone(),
+                self.schema,
                 self.config,
             ))?;
             remaining -= 1;
@@ -139,7 +139,7 @@ impl<'de, 's, 'r, R: Read> MapAccess<'de> for BlockDeserializer<'s, 'r, R> {
             .expect("next_key returned None, next_value should not have been called");
         let value = seed.deserialize(SchemaAwareDeserializer::new(
             self.reader,
-            self.schema.clone(),
+            self.schema,
             self.config,
         ))?;
 
@@ -169,7 +169,7 @@ impl<'de, 's, 'r, R: Read> MapAccess<'de> for BlockDeserializer<'s, 'r, R> {
             ))?;
             let value = vseed.deserialize(SchemaAwareDeserializer::new(
                 self.reader,
-                self.schema.clone(),
+                self.schema,
                 self.config,
             ))?;
 

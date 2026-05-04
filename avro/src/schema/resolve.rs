@@ -23,7 +23,7 @@ use strum::Display;
 use crate::schema::{Aliases, ArraySchema, DecimalSchema, DefaultToResolve, Documentation, EnumSchema, FixedSchema, InnerDecimalSchema, MapSchema, Name, NameMap, NameSet, RecordField, RecordSchema, Schema, SchemaKind, SchemaWithSymbols, UnionSchema, UuidSchema, unravel_inner};
 use crate::schema_equality::compare_resolved;
 use crate::types::Value;
-use crate::{AvroResult, Decimal, types};
+use crate::{AvroResult, types};
 use crate::error::{Details,Error};
 use std::borrow::Borrow;
 use std::collections::BTreeMap;
@@ -700,7 +700,7 @@ impl From<&ResolvedNode<'_>> for SchemaKind {
 
 impl<'a> ResolvedRecord<'a>{
     pub fn unravel(&self) -> RecordSchema{
-        let schema = ResolvedNode::Record(self.clone()).unravel();
+        let schema = ResolvedNode::Record(*self).unravel();
         if let Schema::Record(record_schema) = schema{
             record_schema
         }else{
@@ -805,10 +805,10 @@ impl<'a> ResolvedUnion<'a>{
         let value_schema_kind = SchemaKind::from(value);
         if let Some(i) = self.index_of_schema_kind(value_schema_kind) {
             // fast path
-            let variant_clone = self.get_variant(i).unwrap().clone();
+            let variant_clone = self.get_variant(i).unwrap();
             if value
                 .clone()
-                .resolve_internal(variant_clone.clone())
+                .resolve_internal(variant_clone)
                 .is_ok(){
                 Some((i, variant_clone))
             }else{
@@ -819,7 +819,7 @@ impl<'a> ResolvedUnion<'a>{
             self.variants().enumerate().find(|(_, resolved_node)| {
                 value
                     .clone()
-                    .resolve_internal(resolved_node.clone())
+                    .resolve_internal(*resolved_node)
                     .is_ok()
             })
         }

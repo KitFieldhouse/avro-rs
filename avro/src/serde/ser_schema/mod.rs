@@ -447,7 +447,7 @@ impl<'s, 'w, W: Write> Serializer for SchemaAwareSerializer<'s, 'w, W> {
                 }
                 schema => {
                     let mut bytes_written = zig_i32(variant_index as i32, &mut *self.writer)?;
-                    bytes_written += value.serialize(self.with_different_schema(schema.clone())?)?;
+                    bytes_written += value.serialize(self.with_different_schema(*schema)?)?;
                     Ok(bytes_written)
                 }
             },
@@ -530,7 +530,7 @@ impl<'s, 'w, W: Write> Serializer for SchemaAwareSerializer<'s, 'w, W> {
             let bytes_written = zig_i32(variant_index as i32, &mut *self.writer)?;
             Ok(ManyTupleSerializer::new(
                 self.writer,
-                record.clone(),
+                *record,
                 self.config,
                 Some(bytes_written),
             ))
@@ -604,7 +604,7 @@ impl<'s, 'w, W: Write> Serializer for SchemaAwareSerializer<'s, 'w, W> {
             let bytes_written = zig_i32(variant_index as i32, &mut *self.writer)?;
             Ok(RecordSerializer::new(
                 self.writer,
-                record.clone(),
+                *record,
                 self.config,
                 Some(bytes_written),
             ))

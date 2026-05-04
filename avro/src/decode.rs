@@ -282,7 +282,7 @@ pub(crate) fn decode_internal<R: Read>(
             Ok(index) => {
                 let variant = inner
                     .get_variant(usize::try_from(index).map_err(|e| Details::ConvertI64ToUsize(e, index))?)?;
-                let value = decode_internal(variant.clone(), reader)?;
+                let value = decode_internal(variant, reader)?;
                 Ok(Value::Union(index as u32, Box::new(value)))
             }
             Err(Details::ReadVariableIntegerBytes(io_err)) => {

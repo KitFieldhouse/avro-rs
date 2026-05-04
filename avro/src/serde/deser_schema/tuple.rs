@@ -61,7 +61,7 @@ impl<'de, 's, 'r, R: Read> SeqAccess<'de>
         } else {
             let val = seed.deserialize(SchemaAwareDeserializer::new(
                 self.reader,
-                self.schema.clone(),
+                self.schema,
                 self.config,
             ))?;
             self.field_read = true;

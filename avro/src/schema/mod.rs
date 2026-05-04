@@ -5231,6 +5231,8 @@ mod tests {
 
         Ok(())
     }
+
+    #[test]
     fn avro_rs_test_schema_with_symbol_parse() -> TestResult{
         let schema_with_symbols = SchemaWithSymbols::parse_str(
             r#"{
