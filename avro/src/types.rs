@@ -992,7 +992,16 @@ impl Value {
                     Err(Details::CompareFixedSizes { size, n }.into())
                 }
             }
-            Value::String(s) => Ok(Value::Fixed(s.len(), s.into_bytes())),
+            Value::String(s) => {
+                if s.len() > size {
+                    Err(Details::CompareFixedSizes { size, n: s.len() }.into())
+                } else {
+                    let mut bytes = s.into_bytes();
+                    bytes.resize(size, 0);
+
+                    Ok(Value::Fixed(size, bytes))
+                }
+            },
             Value::Bytes(s) => {
                 if s.len() == size {
                     Ok(Value::Fixed(size, s))
