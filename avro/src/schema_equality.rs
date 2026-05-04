@@ -49,7 +49,7 @@
 //! If the application parses schemas before setting a comparator, the default comparator will be
 //! registered and used!
 
-use crate::schema::{InnerDecimalSchema, UuidSchema};
+use crate::schema::{InnerDecimalSchema, ResolvedNode, ResolvedRecord, UuidSchema};
 use crate::{
     Schema,
     schema::{
@@ -66,6 +66,13 @@ use std::{fmt::Debug, sync::OnceLock};
 pub trait SchemataEq: Debug + Send + Sync {
     /// Compares two schemata for equality.
     fn compare(&self, schema_one: &Schema, schema_two: &Schema) -> bool;
+}
+
+/// A trait that compares two [`ResolvedNode`]'s for equality by walking down
+/// each node tree and comparing.
+pub trait ResolvedNodeEq: Debug + Send + Sync {
+    /// Compares two schemata for equality.
+    fn compare(&self, node_one: &ResolvedNode, node_two: &ResolvedNode) -> bool;
 }
 
 /// Compares two schemas according to the Avro specification by using [their canonical forms].
@@ -257,6 +264,160 @@ pub(crate) fn compare_schemata(schema_one: &Schema, schema_two: &Schema) -> bool
             })
         })
         .compare(schema_one, schema_two)
+}
+
+static RESOLVED_COMPARATOR_ONCE: OnceLock<Box<dyn ResolvedNodeEq>> = OnceLock::new();
+
+// KTODO: flesh this out more...
+/// Sets a custom [`ResolvedNode`] equality comparator.
+///
+/// Returns a unit if the registration was successful or the already
+/// registered comparator if the registration failed.
+///
+pub fn set_resolved_equality_comparator(
+    comparator: Box<dyn ResolvedNodeEq>,
+) -> Result<(), Box<dyn ResolvedNodeEq>> {
+    debug!("Setting a custom schemata equality comparator: {comparator:?}.");
+    RESOLVED_COMPARATOR_ONCE.set(comparator)
+}
+
+pub(crate) fn compare_resolved(node_one: &ResolvedNode, node_two: &ResolvedNode) -> bool {
+        RESOLVED_COMPARATOR_ONCE
+        .get_or_init(|| {
+            debug!("Going to use the default schemata equality comparator: StructFieldEq.",);
+            Box::new(StructFieldResolvedNodeEq())
+        })
+        .compare(node_one, node_two)
+}
+
+#[derive(Debug)]
+pub(crate) struct StructFieldResolvedNodeEq();
+
+
+// TODO: this repeats a significant amount of logic from the normal non-resolved version
+// StructFieldEq. Look into getting these to work closer together and reducing duplicates.
+impl ResolvedNodeEq for StructFieldResolvedNodeEq{
+    fn compare(&self, node_one: &ResolvedNode, node_two: &ResolvedNode) -> bool {
+        if node_one.get_name() != node_two.get_name() {
+            return false;
+        }
+
+        match (node_one, node_two) {
+            (ResolvedNode::Null, ResolvedNode::Null) => true,
+            (ResolvedNode::Null, _) => false,
+            (ResolvedNode::Boolean, ResolvedNode::Boolean) => true,
+            (ResolvedNode::Boolean, _) => false,
+            (ResolvedNode::Int, ResolvedNode::Int) => true,
+            (ResolvedNode::Int, _) => false,
+            (ResolvedNode::Long, ResolvedNode::Long) => true,
+            (ResolvedNode::Long, _) => false,
+            (ResolvedNode::Float, ResolvedNode::Float) => true,
+            (ResolvedNode::Float, _) => false,
+            (ResolvedNode::Double, ResolvedNode::Double) => true,
+            (ResolvedNode::Double, _) => false,
+            (ResolvedNode::Bytes, ResolvedNode::Bytes) => true,
+            (ResolvedNode::Bytes, _) => false,
+            (ResolvedNode::String, ResolvedNode::String) => true,
+            (ResolvedNode::String, _) => false,
+            (ResolvedNode::BigDecimal, ResolvedNode::BigDecimal) => true,
+            (ResolvedNode::BigDecimal, _) => false,
+            (ResolvedNode::Date, ResolvedNode::Date) => true,
+            (ResolvedNode::Date, _) => false,
+            (ResolvedNode::TimeMicros, ResolvedNode::TimeMicros) => true,
+            (ResolvedNode::TimeMicros, _) => false,
+            (ResolvedNode::TimeMillis, ResolvedNode::TimeMillis) => true,
+            (ResolvedNode::TimeMillis, _) => false,
+            (ResolvedNode::TimestampMicros, ResolvedNode::TimestampMicros) => true,
+            (ResolvedNode::TimestampMicros, _) => false,
+            (ResolvedNode::TimestampMillis, ResolvedNode::TimestampMillis) => true,
+            (ResolvedNode::TimestampMillis, _) => false,
+            (ResolvedNode::TimestampNanos, ResolvedNode::TimestampNanos) => true,
+            (ResolvedNode::TimestampNanos, _) => false,
+            (ResolvedNode::LocalTimestampMicros, ResolvedNode::LocalTimestampMicros) => true,
+            (ResolvedNode::LocalTimestampMicros, _) => false,
+            (ResolvedNode::LocalTimestampMillis, ResolvedNode::LocalTimestampMillis) => true,
+            (ResolvedNode::LocalTimestampMillis, _) => false,
+            (ResolvedNode::LocalTimestampNanos, ResolvedNode::LocalTimestampNanos) => true,
+            (ResolvedNode::LocalTimestampNanos, _) => false,
+            (
+                ResolvedNode::Record(resolved_record_one),
+                ResolvedNode::Record(resolved_record_two)
+            ) => {
+                self.compare_resolved_records(resolved_record_one, resolved_record_two)
+            }
+            (ResolvedNode::Record(_), _) => false,
+            (
+                ResolvedNode::Enum(EnumSchema { symbols: symbols_one, ..}),
+                ResolvedNode::Enum(EnumSchema { symbols: symbols_two, .. })
+            ) => {
+                symbols_one == symbols_two
+            }
+            (ResolvedNode::Enum(_), _) => false,
+            (
+                ResolvedNode::Fixed(FixedSchema { size: size_one, ..}),
+                ResolvedNode::Fixed(FixedSchema { size: size_two, .. })
+            ) => {
+                size_one == size_two
+            }
+            (ResolvedNode::Fixed(_), _) => false,
+            (
+                ResolvedNode::Union(resolved_union_one),
+                ResolvedNode::Union(resolved_union_two)
+            ) => {
+                resolved_union_one.variants_len() == resolved_union_two.variants_len()
+                    && resolved_union_one.variants()
+                    .zip(resolved_union_two.variants())
+                    .all(|(s1, s2)| self.compare(&s1, &s2))
+            }
+            (ResolvedNode::Union(_), _) => false,
+            (
+                ResolvedNode::Decimal(DecimalSchema { precision: precision_one, scale: scale_one, inner: inner_one }),
+                ResolvedNode::Decimal(DecimalSchema { precision: precision_two, scale: scale_two, inner: inner_two })
+            ) => {
+                precision_one == precision_two && scale_one == scale_two && match (inner_one, inner_two) {
+                    (InnerDecimalSchema::Bytes, InnerDecimalSchema::Bytes) => true,
+                    (InnerDecimalSchema::Fixed(FixedSchema { size: size_one, .. }), InnerDecimalSchema::Fixed(FixedSchema { size: size_two, ..})) => {
+                        size_one == size_two
+                    }
+                    _ => false,
+                }
+            }
+            (ResolvedNode::Decimal(_), _) => false,
+            (ResolvedNode::Uuid(UuidSchema::Bytes), ResolvedNode::Uuid(UuidSchema::Bytes)) => true,
+            (ResolvedNode::Uuid(UuidSchema::Bytes), _) => false,
+            (ResolvedNode::Uuid(UuidSchema::String), ResolvedNode::Uuid(UuidSchema::String)) => true,
+            (ResolvedNode::Uuid(UuidSchema::String), _) => false,
+            (ResolvedNode::Uuid(UuidSchema::Fixed(FixedSchema { size: size_one, ..})), ResolvedNode::Uuid(UuidSchema::Fixed(FixedSchema { size: size_two, ..}))) => {
+                size_one == size_two
+            },
+            (ResolvedNode::Uuid(UuidSchema::Fixed(_)), _) => false,
+            (
+                ResolvedNode::Array(resolved_array_one),
+                ResolvedNode::Array(resolved_array_two)
+            ) => {
+                self.compare(&resolved_array_one.items(), &resolved_array_two.items())
+            }
+            (ResolvedNode::Array(_), _) => false,
+            (ResolvedNode::Duration(FixedSchema { size: size_one, ..}), ResolvedNode::Duration(FixedSchema { size: size_two, ..})) => size_one == size_two,
+            (ResolvedNode::Duration(_), _) => false,
+            (
+                ResolvedNode::Map(resolved_map_one),
+                ResolvedNode::Map(resolved_map_two)
+            ) => {
+                self.compare(&resolved_map_one.types(), &resolved_map_two.types())
+            }
+            (ResolvedNode::Map(_), _) => false,
+        }
+    }
+}
+
+impl StructFieldResolvedNodeEq {
+    fn compare_resolved_records(&self, record_one: &ResolvedRecord, record_two: &ResolvedRecord) -> bool {
+        record_one.field_len() == record_two.field_len()
+            &&  record_one.fields()
+                .zip(record_two.fields())
+                .all(|(f1, f2)| f1.name() == f2.name() && self.compare(&f1.schema(), &f2.schema()))
+    }
 }
 
 #[cfg(test)]

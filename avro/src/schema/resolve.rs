@@ -21,6 +21,7 @@ use serde::Serialize;
 use strum::Display;
 
 use crate::schema::{Aliases, ArraySchema, DecimalSchema, DefaultToResolve, Documentation, EnumSchema, FixedSchema, InnerDecimalSchema, MapSchema, Name, NameMap, NameSet, RecordField, RecordSchema, Schema, SchemaKind, SchemaWithSymbols, UnionSchema, UuidSchema, unravel_inner};
+use crate::schema_equality::compare_resolved;
 use crate::types::Value;
 use crate::{AvroResult, Decimal, types};
 use crate::error::{Details,Error};
@@ -1000,7 +1001,7 @@ impl PartialEq for ResolvedSchema{
 // KTODO: need to think about this a little more...
 impl PartialEq for ResolvedNode<'_>{
     fn eq(&self, other: &Self) -> bool {
-        todo!();
+        compare_resolved(self, other)
     }
 }
 
