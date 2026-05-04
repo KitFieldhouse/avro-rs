@@ -193,7 +193,7 @@ fn test_complex_namespace() {
         assert_eq!(Some("com.testing.complex.namespace"), name.namespace());
         let inner_schema = fields
             .iter()
-            .filter(|field| field.name == "a")
+            .filter(|field| field.name.as_ref() == "a")
             .map(|field| &field.schema)
             .next();
         if let Some(Schema::Record(RecordSchema { name, .. })) = inner_schema {
@@ -1459,7 +1459,7 @@ fn test_basic_struct_with_defaults() {
         assert_eq!("TestBasicStructWithDefaultValues", name.fullname(None));
         use serde_json::json;
         for field in fields {
-            match field.name.as_str() {
+            match field.name.as_ref() {
                 "a" => assert_eq!(Some(json!(123_i32)), field.default),
                 "b" => assert_eq!(
                     Some(json!("The default value for 'b'".to_owned())),
@@ -1552,7 +1552,7 @@ fn avro_3633_test_basic_struct_with_skip_attribute() {
     if let Schema::Record(RecordSchema { name, fields, .. }) = &derived_schema {
         assert_eq!("TestBasicStructWithSkipAttribute", name.fullname(None));
         for field in fields {
-            match field.name.as_str() {
+            match field.name.as_ref() {
                 "condition" => panic!("Unexpected field 'condition'"),
                 "mystruct" => panic!("Unexpected field 'mystruct'"),
                 "map" => panic!("Unexpected field 'map'"),
@@ -1617,7 +1617,7 @@ fn avro_3633_test_basic_struct_with_rename_attribute() {
     if let Schema::Record(RecordSchema { name, fields, .. }) = &derived_schema {
         assert_eq!("TestBasicStructWithRenameAttribute", name.fullname(None));
         for field in fields {
-            match field.name.as_str() {
+            match field.name.as_ref() {
                 "a" => panic!("Unexpected field name 'a': must be 'a1'"),
                 "c" => panic!("Unexpected field name 'c': must be 'c1'"),
                 _ => {}
@@ -1647,7 +1647,7 @@ fn test_avro_3663_raw_identifier_field_name() {
     let derived_schema = TestRawIdent::get_schema();
     if let Schema::Record(RecordSchema { fields, .. }) = derived_schema {
         let field = fields.first().expect("TestRawIdent must contain a field");
-        assert_eq!(field.name, "type");
+        assert_eq!(field.name.as_ref(), "type");
     } else {
         panic!("Unexpected schema type for {derived_schema:?}")
     }
