@@ -16,7 +16,6 @@
 // under the License.
 
 use std::{
-    borrow::Borrow,
     collections::{BTreeMap, HashMap},
     fmt::{Debug, Formatter},
     sync::Arc
@@ -28,8 +27,8 @@ use strum::IntoDiscriminant;
 use crate::{
     error::Details,
     schema::{
-        DecimalSchema, FixedSchema, InnerDecimalSchema,
-        Name, RecordSchema, Schema,
+        DecimalSchema, InnerDecimalSchema,
+        Name, Schema,
         SchemaKind, UuidSchema,
     },
 };
