@@ -639,8 +639,8 @@ impl Value {
     /// Resolve this value (self) with provided resolved schema.
     /// This resolution techinically follows a superset of the the schema resolution
     /// rules defined by the [specification](https://avro.apache.org/docs/++version++/specification/).
-    pub fn resolve_against_resolved(self, resolved: ResolvedSchema) -> AvroResult<Self> {
-        self.resolve_internal(ResolvedNode::new(&resolved))
+    pub fn resolve_against_resolved(self, resolved: &ResolvedSchema) -> AvroResult<Self> {
+        self.resolve_internal(ResolvedNode::new(resolved))
     }
 
     /// Resolves value against the provided schema.
@@ -652,7 +652,7 @@ impl Value {
     /// with this new [`ResolvedSchema`].
     /// Prefer using [`Self::resolve_against_resolved`] on a given [`ResolvedSchema`].
     pub fn resolve(self, schema: &Schema)->AvroResult<Self>{
-       self.resolve_against_resolved(schema.clone().try_into()?)
+       self.resolve_against_resolved(&ResolvedSchema::try_from(schema)?)
     }
 
     pub(crate) fn resolve_internal(
@@ -705,10 +705,10 @@ impl Value {
             ResolvedNode::Union(resolved_union) => {
                 self.resolve_union(resolved_union)
             }
-            ResolvedNode::Array(resolved_array) => {
+            ResolvedNode::Array(ref resolved_array) => {
                 self.resolve_array(resolved_array)
             }
-            ResolvedNode::Map(resolved_map) => self.resolve_map(resolved_map),
+            ResolvedNode::Map(ref resolved_map) => self.resolve_map(resolved_map),
             ResolvedNode::Record(resolved_record) => {
                 self.resolve_record(&resolved_record)
             }
@@ -1075,7 +1075,7 @@ impl Value {
 
     fn resolve_array(
         self,
-        resolved_array: ResolvedArray,
+        resolved_array: &ResolvedArray,
     ) -> Result<Self, Error> {
         let items_resolved = resolved_array.items();
         match self {
@@ -1095,7 +1095,7 @@ impl Value {
 
     fn resolve_map(
         self,
-        resolved_map: ResolvedMap,
+        resolved_map: &ResolvedMap,
     ) -> Result<Self, Error> {
         let resolved_types = resolved_map.types();
         match self {
@@ -3010,7 +3010,7 @@ mod tests {
 
         let [rs] = ResolvedSchema::builder().additional(vec![referenced_schema])?.build_array([main_schema])?;
 
-        let resolve_result = avro_value.clone().resolve_against_resolved(rs);
+        let resolve_result = avro_value.clone().resolve_against_resolved(&rs);
 
         assert!(
             resolve_result.is_ok(),
@@ -3047,7 +3047,7 @@ mod tests {
 
         let [rs] = ResolvedSchema::builder().additional(vec![referenced_enum, referenced_record])?.build_array([main_schema])?;
 
-        let resolve_result = avro_value.resolve_against_resolved(rs.clone())?;
+        let resolve_result = avro_value.resolve_against_resolved(&rs)?;
 
         assert!(
             resolve_result.validate_against_resolved(&rs),

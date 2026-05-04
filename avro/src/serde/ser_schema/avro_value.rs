@@ -106,22 +106,22 @@ impl<'s, B: Borrow<Value>> Serialize for AvroValueSerialize<'s, B> {
             }
             Value::Record(record) => {
                 serializer.collect_map(record
-                    .into_iter()
+                    .iter()
                     .map(|(key, val)|{
                         (key.as_ref(), AvroValueSerialize::new(val))
                     }))
             }
             Value::Map(map) => {
                 serializer.collect_map(map
-                    .into_iter()
+                    .iter()
                     .map(|(key, val)|{
                         (key, AvroValueSerialize::new(val))
                 }))
             }
             Value::Array(array) => {
                 serializer.collect_seq(array
-                    .into_iter()
-                    .map(|v| AvroValueSerialize::new(v)))
+                    .iter()
+                    .map(AvroValueSerialize::new))
             }
             Value::Union(_union_index, val) => {
                     AvroValueSerialize::new(val).serialize(serializer)

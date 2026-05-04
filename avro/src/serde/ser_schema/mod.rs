@@ -1488,7 +1488,7 @@ mod tests {
             ("micros", "Micros"),
             ("nanos", "Nanos"),
         ] {
-            let schema = ResolvedSchema::parse_str(&format!(
+            let schema = ResolvedSchema::parse_str(format!(
                 r#"{{
                 "type": "long",
                 "logicalType": "timestamp-{precision}"
