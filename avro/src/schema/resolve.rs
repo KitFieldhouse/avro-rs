@@ -39,7 +39,7 @@ pub struct ResolvedContext{
 
 impl ResolvedContext{
     /// gets the resolved context from a `ResolvedSchema`
-    fn from_resolved_schema(resolved_schema : &ResolvedSchema) -> ResolvedContext{
+    pub fn from_resolved_schema(resolved_schema : &ResolvedSchema) -> ResolvedContext{
         resolved_schema.context.clone()
     }
 

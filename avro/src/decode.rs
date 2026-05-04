@@ -22,7 +22,7 @@ use crate::{
     decimal::Decimal,
     duration::Duration,
     error::Details,
-    schema::{DecimalSchema, EnumSchema, FixedSchema, ResolvedSchema, Schema, ResolvedNode, ResolvedRecord},
+    schema::{DecimalSchema, EnumSchema, FixedSchema, ResolvedSchema, Schema, ResolvedNode},
     types::Value,
     util::{safe_len, zag_i32, zag_i64},
 };
