@@ -489,14 +489,14 @@ impl ResolvedSchema{
 }
 
 /// An Avro array that makes a type level promise that its `"item"` schema is fully resolved.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Copy)]
 pub struct ResolvedArray<'a>{
     root: &'a ResolvedSchema,
     array_schema: &'a ArraySchema,
 }
 
 /// An Avro map that makes a type level promise that its `"types"` schema is fully resolved
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Copy)]
 pub struct ResolvedMap<'a>{
     root: &'a ResolvedSchema,
     map_schema: &'a MapSchema
@@ -511,7 +511,7 @@ pub struct ResolvedUnion<'a>{
 
 /// An Avro record that makes a type level promise that each of its field's schemata are fully
 /// resolved and any provided default value has been resolved against this schema.
-#[derive(Clone,Debug)]
+#[derive(Clone, Debug, Copy)]
 pub struct ResolvedRecord<'a>{
     root: &'a ResolvedSchema,
     record_schema: &'a RecordSchema,
@@ -519,7 +519,7 @@ pub struct ResolvedRecord<'a>{
 
 /// An Avro record field that makes a type level promise that its schema is fully resolved and any
 /// provided default value has been resolved against this schema.
-#[derive(Clone,Debug)]
+#[derive(Clone, Debug, Copy)]
 pub struct ResolvedRecordField<'a>{
     parent_name: &'a Arc<Name>,
     root: &'a ResolvedSchema,
@@ -528,7 +528,7 @@ pub struct ResolvedRecordField<'a>{
 
 /// A node within a walk of a Avro Schema that makes the type level promise that its children
 /// schema are resovled unambiguously.
-#[derive(Clone,Debug, Display)]
+#[derive(Clone,Debug, Display, Copy)]
 pub enum ResolvedNode<'a>{
     Null,
     Boolean,
